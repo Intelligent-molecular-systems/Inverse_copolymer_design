@@ -1,2 +1,2 @@
-# G2SVAE
-Code for "Graph-to-String Variational Autoencoder for Synthetic Polymer Design"
+# Graph-to-String Variational Autoencoder for Synthetic Polymer Design
+This repository contains the implementation of the Graph-to-String Variational Autoencoder (GS-VAE) model presented in the publication titled "Graph-to-String Variational Autoencoder for Synthetic Polymer Design." The GS-VAE is designed to generate synthetic polymer structures by translating molecular graphs into string representations using a variational autoencoder architecture.

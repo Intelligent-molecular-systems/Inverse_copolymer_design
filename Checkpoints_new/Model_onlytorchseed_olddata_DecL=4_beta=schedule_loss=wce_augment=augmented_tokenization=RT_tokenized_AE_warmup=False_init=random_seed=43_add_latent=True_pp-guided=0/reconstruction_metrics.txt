@@ -1,0 +1,1 @@
+Full rec: 85.8971 % Rec both monomers: 94.2751 % Rec MonA: 97.3237 % Rec MonB: 94.5078 % Rec Stoichiometry: 91.0635 % Rec Conectivity: 99.8604 %  Rec monomer A val: 100.0000 % Rec monomer B val: 99.9069 % Validity rec: 99.8138 % 

@@ -4,5 +4,4 @@ __pycache__/
 *.png
 *.npy
 *.pkl
-Model_*/
 *.pt

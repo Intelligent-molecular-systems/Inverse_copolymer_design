@@ -1,0 +1,1 @@
+Gen Mon A validity: 99.9250 % Gen Mon B validity: 99.7875 % Gen validity: 99.7125 % Novelty: 95.1625 % Novelty MonA full dataset: 1.8000 % Novelty MonB full dataset: 8.8688 % Novelty in full dataset: 80.7313 % Diversity: 36.0187 % Diversity (novel polymers): 37.4425 % 

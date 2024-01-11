@@ -1,9 +1,8 @@
 .vscode/
 __pycache__/
-*.pt
 *.pth
 *.png
 *.npy
 *.pkl
-*.sbatch
 Model_*/
+*.pt

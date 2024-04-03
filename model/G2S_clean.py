@@ -411,12 +411,12 @@ class SequenceDecoder(nn.Module):
             decoder_input = decode_strategy.current_predictions.view(-1, 1, 1)
             dec_outs, dec_attn = self.Decoder(tgt=decoder_input, enc_out=enc_out, src_len=src_len_tiled, step=step, add_latent=self.add_latent)
             if "std" in dec_attn:
-                attn = dec_attn["std"]
+                attn = dec_attn["std"].detach()
             else:
                 attn = None
 
             scores = self.output_layer(dec_outs.squeeze(1))
-            log_probs = F.log_softmax(scores.to(torch.float32), dim=-1)
+            log_probs = F.log_softmax(scores.to(torch.float32), dim=-1).detach()
 
             decode_strategy.advance(log_probs, attn)
             
@@ -525,7 +525,13 @@ class G2S_VAE(nn.Module):
             eps = torch.randn_like(std) * eps_scale
             return eps.mul(std).add_(mean)
         else:
-            return mean        
+            return mean  
+              
+    def sample_inference(self, mean, log_var, eps_scale=1):
+        
+        std = log_var.mul(0.5).exp_()
+        eps = torch.randn_like(std) * eps_scale
+        return eps.mul(std).add_(mean)   
 
     def forward(self, batch_list, dest_is_origin_matrix, inc_edges_to_atom_matrix, device):
         # encode
@@ -558,7 +564,7 @@ class G2S_VAE(nn.Module):
                 log_var = self.lincompress(log_var)
            
         if sample:
-            z= self.sample(mean, log_var, eps_scale=self.eps)
+            z= self.sample_inference(mean, log_var, eps_scale=self.eps)
         else:
             z= mean
             log_var = 0
@@ -599,7 +605,8 @@ class G2S_VAE_PPguided(nn.Module):
             self.lincompress = Linear(self.hidden_dim, self.embedding_dim).to(device)
         
         self.pp_ffn_hidden = 56
-        self.alpha = 1
+        #self.alpha = model_config['max_alpha']
+        self.alpha=0.1
         #self.max_n=data_config['max_num_nodes']
         self.PP_lin1 = Sequential(Linear(embedding_dim, self.pp_ffn_hidden), ReLU(), ).to(device)
         self.PP_lin2 = Sequential(Linear(self.pp_ffn_hidden, 2)).to(device)
@@ -636,6 +643,119 @@ class G2S_VAE_PPguided(nn.Module):
         recon_loss, acc, predictions, target = self.Decoder(batch_list, z)
 
         return recon_loss + self.beta*kl_loss + self.alpha*mse, recon_loss, kl_loss, mse, acc, predictions, target, z, y
+
+    def masked_mse(self, y_true, y_pred):
+        # Create a mask where the true values are not NaN
+        mask = ~torch.isnan(y_true).any(dim=1)
+        
+        # Calculate MSE only for non-missing values
+        mse = F.mse_loss(y_pred[mask], y_true[mask], reduction='none')
+        
+        # Take the mean over the non-missing values
+        return torch.mean(mse)
+    
+    def inference(self, data, device, dest_is_origin_matrix=None, inc_edges_to_atom_matrix=None, sample=False, log_var=None):
+        #TODO: Function arguments (test batch?, single graph?, latent representation?), right encoder call
+        if isinstance(data, torch.Tensor): # tensor with latent representations
+            if data.size(-1) != self.embedding_dim: #tensor input needs to be embedding/hidden size
+                raise Exception('Size of input is {}, must be {}'.format(data.size(0), self.embedding_dim))
+            if data.dim() == 1: # is the case if data is only one sample
+                mean = data.unsqueeze(0) #dimension for batch size
+            else:
+                mean = data
+        elif isinstance(data, Data): # batch list of graphs
+            mean, log_var = self.Encoder(data, dest_is_origin_matrix, inc_edges_to_atom_matrix, device)
+            if not self.hidden_dim==self.embedding_dim:
+                mean = self.lincompress(mean)
+                log_var = self.lincompress(log_var)
+           
+        if sample:
+            z= self.sample(mean, log_var, eps_scale=self.eps)
+        else:
+            z= mean
+            log_var = 0
+       
+        pp_hidden = self.PP_lin1(z) #[b,hidden_dim] -> [b,pp_ffn_hidden]
+        y = self.PP_lin2(pp_hidden) #[b,pp_ffn_hidden] -> [b, 2] for 2 properties
+
+        predictions = self.Decoder.inference(z)
+        # Property predictions 
+               
+        return predictions, mean, log_var, z, y 
+    
+    def number_of_parameters(self):
+        return(sum(p.numel() for p in self.parameters() if p.requires_grad))
+    
+
+    
+class G2S_VAE_PPguideddisabled(nn.Module):
+    def __init__(self, node_dim, edge_dim, hidden_dim, embedding_dim, device, model_config, vocab, seed, loss_weights=None, add_latent=True):
+        super().__init__()
+        self.node_dim=node_dim
+        self.edge_dim=edge_dim
+        self.hidden_dim=hidden_dim
+        self.device=device
+        self.seed=seed
+        self.eps = model_config['epsilon']
+
+        try: 
+            self.embedding_dim = model_config['embedding_dim']
+        except:
+            self.embedding_dim = embedding_dim
+        # in case beta is schedule the value will be specified in train.py
+        if not model_config["beta"] =="schedule":
+            self.beta=1.0
+        self.config = model_config
+        self.vocab = vocab
+        #self.max_n=data_config['max_num_nodes']
+        #if model_config['pooling']=='custom':
+        #    self.Encoder = GraphEncoder_GMT(node_dim, edge_dim, hidden_dim, device, model_config)
+        #elif model_config['pooling']=='mean':
+        self.Encoder = GraphEncoder(node_dim, edge_dim, hidden_dim, device, model_config)
+        self.Decoder = SequenceDecoder(model_config, vocab, loss_weights, add_latent=add_latent)
+        if not self.hidden_dim==self.embedding_dim:
+            self.lincompress = Linear(self.hidden_dim, self.embedding_dim).to(device)
+        
+        self.pp_ffn_hidden = 56
+        self.alpha = model_config['max_alpha']
+
+        #self.max_n=data_config['max_num_nodes']
+        self.PP_lin1 = Sequential(Linear(embedding_dim, self.pp_ffn_hidden), ReLU(), ).to(device)
+        self.PP_lin2 = Sequential(Linear(self.pp_ffn_hidden, 2)).to(device)
+        self.dropout = nn.Dropout(0.2)
+
+    def sample(self, mean, log_var, eps_scale=0.01):
+        
+        if self.training:
+            std = log_var.mul(0.5).exp_()
+            eps = torch.randn_like(std) * eps_scale
+            return eps.mul(std).add_(mean)
+        else:
+            return mean        
+
+    def forward(self, batch_list, dest_is_origin_matrix, inc_edges_to_atom_matrix, device):
+        # encode
+        h_G_mean, h_G_var = self.Encoder(batch_list, dest_is_origin_matrix, inc_edges_to_atom_matrix, device)
+        if not self.hidden_dim==self.embedding_dim:
+            h_G_mean = self.lincompress(h_G_mean)
+            h_G_var = self.lincompress(h_G_var)
+        z = self.sample(h_G_mean, h_G_var, eps_scale=self.eps)
+        kl_loss = -0.5 * torch.sum(1 + h_G_var - h_G_mean.pow(2) - h_G_var.exp())/(len(batch_list.ptr-1))
+
+        # Property predictions 
+        pp_hidden = self.PP_lin1(z) #[b,hidden_dim] -> [b,pp_ffn_hidden]
+        pp_hidden = self.dropout(pp_hidden)
+        y = self.PP_lin2(pp_hidden) #[b,pp_ffn_hidden] -> [b, 2] for 2 properties
+        y1 = torch.unsqueeze(batch_list.y1.float(),1)
+        y2 = torch.unsqueeze(batch_list.y2.float(),1)
+        y_true = torch.cat((y1,y2), dim=1)
+        mse = self.masked_mse(y_true,y)
+
+        # decode
+        recon_loss, acc, predictions, target = self.Decoder(batch_list, z)
+        
+        # Notice that the MSE explicitely is not used in the aggregated overall loss, so the loss does not contribute to changing the parameters of encoder and decoder. 
+        return recon_loss + self.beta*kl_loss, recon_loss, kl_loss, mse, acc, predictions, target, z, y
 
     def masked_mse(self, y_true, y_pred):
         # Create a mask where the true values are not NaN

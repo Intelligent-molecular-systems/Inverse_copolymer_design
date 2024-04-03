@@ -82,7 +82,7 @@ if os.path.isfile(filepath):
     if args.ppguided:
         model_type = G2S_VAE_PPguided
     else: 
-        model_type = G2S_VAE
+        model_type = G2S_VAE_PPguideddisabled
     checkpoint = torch.load(filepath, map_location=torch.device('cpu'))
     model_config = checkpoint["model_config"]
     batch_size = model_config['batch_size']

@@ -159,7 +159,8 @@ parser.add_argument("--initialization", default="random", choices=["random", "xa
 parser.add_argument("--add_latent", type=int, default=1)
 parser.add_argument("--ppguided", type=int, default=0)
 parser.add_argument("--dec_layers", type=int, default=4)
-parser.add_argument("--max_beta", type=float, default=0.01)
+parser.add_argument("--max_beta", type=float, default=0.1)
+parser.add_argument("--max_alpha", type=float, default=0.1)
 parser.add_argument("--epsilon", type=float, default=1)
 
 
@@ -201,6 +202,7 @@ model_config = {
     'learning_rate': 1e-3,
     'es_patience': 5,
     'loss': args.loss, # focal or ce
+    'max_alpha': args.max_alpha,
 }
 batch_size = model_config['batch_size']
 epochs = model_config['epochs']
@@ -233,7 +235,7 @@ if model_config['loss']=="ce":
 if args.ppguided:
     model_type = G2S_VAE_PPguided
 else:
-    model_type = G2S_VAE
+    model_type = G2S_VAE_PPguideddisabled
 model = model_type(num_node_features,num_edge_features,hidden_dimension,embedding_dim,device,model_config, vocab, seed, loss_weights=class_weights, add_latent=add_latent)
 model.to(device)
 

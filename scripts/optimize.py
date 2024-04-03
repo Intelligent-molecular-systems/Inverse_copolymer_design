@@ -96,6 +96,86 @@ if os.path.isfile(filepath):
 
 dir_name = os.path.join(main_dir_path,'Checkpoints/', model_name)
 
+class SamplesHandler(): 
+    def __init__(self, model):
+        self.model = model
+     
+    def validcheck_reencode_predict(self, predictions):
+        prediction_strings, validity = self._calc_validity(predictions)
+        predictions_valid = [j for j, valid in zip(predictions, validity) if valid]
+        prediction_strings_valid = [j for j, valid in zip(prediction_strings, validity) if valid]
+        y_p_after_encoding_valid, z_p_after_encoding_valid, all_reconstructions_valid, dict_data_loader=self._encode_and_predict_decode_molecules(predictions_valid)
+
+        return prediction_strings_valid, validity, y_p_after_encoding_valid, all_reconstructions_valid
+
+
+    def _calc_validity(self, predictions):
+        # Molecule validity check     
+        # Return a boolean array indicating whether each solution is valid or not
+        prediction_strings = [combine_tokens(tokenids_to_vocab(predictions[sample][0].tolist(), vocab), tokenization=tokenization) for sample in range(len(predictions))]
+        mols_valid= []
+        for _s in prediction_strings:
+            poly_input = _s[:-1] # Last element is the _ char
+            poly_input_nocan=None
+            poly_label1 = np.nan
+            poly_label2 = np.nan
+            try: 
+                poly_graph=poly_smiles_to_graph(poly_input, poly_label1, poly_label2, poly_input_nocan)
+                mols_valid.append(1)
+            except:
+                poly_graph = None
+                mols_valid.append(0)
+        mols_valid = np.array(mols_valid) # List of lists
+        return prediction_strings, mols_valid
+    
+    def _encode_and_predict_decode_molecules(self, predictions):
+        # create data that can be encoded again
+        prediction_strings = [combine_tokens(tokenids_to_vocab(predictions[sample][0].tolist(), vocab), tokenization=tokenization) for sample in range(len(predictions))]
+        data_list = []
+        for i, s in enumerate(prediction_strings):
+            poly_input = s[:-1] # Last element is the _ char
+            poly_input_nocan=None
+            poly_label1 = np.nan
+            poly_label2 = np.nan
+            g = poly_smiles_to_graph(poly_input, poly_label1, poly_label2, poly_input_nocan)
+            if tokenization=="oldtok":
+                target_tokens = tokenize_poly_input(poly_input=poly_input)
+            elif tokenization=="RT_tokenized":
+                target_tokens = tokenize_poly_input_RTlike(poly_input=poly_input)
+            tgt_token_ids, tgt_lens = get_seq_features_from_line(tgt_tokens=target_tokens, vocab=vocab)
+            g.tgt_token_ids = tgt_token_ids
+            g.tgt_token_lens = tgt_lens
+            g.to(device)
+            data_list.append(g)
+        data_loader = DataLoader(dataset=data_list, batch_size=64, shuffle=False)
+        dict_data_loader = MP_Matrix_Creator(data_loader)
+
+        #Encode and predict
+        batches = list(range(len(dict_data_loader)))
+        y_p = []
+        z_p = []
+        all_reconstructions = []
+        with torch.no_grad():
+            for i, batch in enumerate(batches):
+                data = dict_data_loader[str(batch)][0]
+                data.to(device)
+                dest_is_origin_matrix = dict_data_loader[str(batch)][1]
+                dest_is_origin_matrix.to(device)
+                inc_edges_to_atom_matrix = dict_data_loader[str(batch)][2]
+                inc_edges_to_atom_matrix.to(device)
+
+                # Perform a single forward pass.
+                reconstruction, _, _, z, y = model.inference(data=data, device=device, dest_is_origin_matrix=dest_is_origin_matrix, inc_edges_to_atom_matrix=inc_edges_to_atom_matrix, sample=False, log_var=None)
+                y_p.append(y.cpu().numpy())
+                z_p.append(z.cpu().numpy())
+                reconstruction_strings = [combine_tokens(tokenids_to_vocab(reconstruction[sample][0].tolist(), vocab), tokenization=tokenization) for sample in range(len(reconstruction))]
+                all_reconstructions.extend(reconstruction_strings)
+        #Return the predictions from the encoded latents
+        y_p_flat = [sublist.tolist() for array_ in y_p for sublist in array_]
+        z_p_flat = [sublist.tolist() for array_ in z_p for sublist in array_]
+        self.modified_solution = z_p_flat
+
+        return y_p_flat, z_p_flat, all_reconstructions, dict_data_loader
 
 def MP_Matrix_Creator(loader):
     '''
@@ -425,18 +505,28 @@ with open(dir_name+'res_optimization', 'rb') as f:
 with open(dir_name+'best_solutions', 'rb') as f:
     best_solutions = pickle.load(f)
 # decode the best solution
+#TODO: Use the samples handler instead of doing the complicated 
+samples_handler = SamplesHandler(model)
 prediction_strings= []
 predicted_y = []
+all_reconstructions = []
+predicted_y_after_reencoding = []
 with torch.no_grad():
     for b in best_solutions:
         bi = torch.from_numpy(b[0]).to(device).to(torch.float32)
         predictions, _, _, _, y = model.inference(data=bi, device=device, sample=False, log_var=None)
         prediction_s = [combine_tokens(tokenids_to_vocab(predictions[sample][0].tolist(), vocab), tokenization=tokenization) for sample in range(len(predictions))]
-        prediction_strings.extend(prediction_s)
-        predicted_y.append(y)
+        prediction_strings_valid, validity, y_p_after_encoding_valid, rec_strings=samples_handler.validcheck_reencode_predict(predictions)
+        prediction_strings.extend(prediction_strings_valid)
+        predicted_y.append([j for j, valid in zip(y, validity) if valid]) #only the valid ones 
+        all_reconstructions.extend(rec_strings)
+        predicted_y_after_reencoding.append(y_p_after_encoding_valid)
+
 
 print(prediction_strings)
 print(predicted_y)
+print(all_reconstructions)
+print(predicted_y_after_reencoding)
 with open(dir_name+'prediction_strings', 'wb') as f:
     pickle.dump(prediction_strings, f)
 with open(dir_name+'predicted_y', 'wb') as f:
@@ -445,7 +535,7 @@ with open(dir_name+'predicted_y', 'wb') as f:
 
 # 1. convert the molecular strings to graphs again
 # TODO: non valid strings need to be captured somehow
-data_list = []
+""" data_list = []
 for i, s in enumerate(prediction_strings):
     poly_input = s[:-1] # Last element is the _ char
     poly_input_nocan=None
@@ -503,13 +593,15 @@ with torch.no_grad():
         reconstruction_strings = [combine_tokens(tokenids_to_vocab(reconstruction[sample][0].tolist(), vocab), tokenization=tokenization) for sample in range(len(reconstruction))]
         all_reconstructions.extend(reconstruction_strings)
 
+ 
 # 4. Compare results with the original output from GA
 print(y_p)
 print(prediction_strings)
 y_p=y_p[0].tolist()
 print(y_p)
 print(len(y_p))
-print(len(prediction_strings))
+print(len(prediction_strings))"""
+y_p = predicted_y_after_reencoding.copy()
 predicted_y = [tensor.squeeze().tolist() for tensor in predicted_y]
 predicted_y = [item for sublist in predicted_y for item in sublist]
 i=0
@@ -563,8 +655,59 @@ plt.savefig(dir_name+'paretofront.png',  dpi=300)
 
 
 
+# Sample around the optimal molecule and predict the property values
+best_solution = res.X
+best_fitness = res.F
+
+samples_handler= SamplesHandler(model)
+
+prediction_strings=[]
+predicted_y=[]
+seed_z = best_solution
+seed_z = torch.from_numpy(seed_z[0]).unsqueeze(0).repeat(64,1).to(device).to(torch.float32)
+with torch.no_grad():
+    predictions, _, _, _, y = model.inference(data=seed_z[0], device=device, sample=False, log_var=None)
+    seed_string = [combine_tokens(tokenids_to_vocab(predictions[sample][0].tolist(), vocab), tokenization=tokenization) for sample in range(len(predictions))]
+    _, _, y_p_after_encoding_seed, seed_rec=samples_handler.validcheck_reencode_predict(predictions)
+sampled_z = []
+y_p_GA = []
+model.eval()
+with torch.no_grad():
+    # Define the mean and standard deviation of the Gaussian noise
+    mean = 0
+    std = args.epsilon/2
+    # Create a tensor of the same size as the original tensor with random noise
+    noise = torch.tensor(np.random.normal(mean, std, size=seed_z.size()), dtype=torch.float, device=device)
+
+    # Add the noise to the original tensor
+    seed_z_noise = seed_z + noise
+    sampled_z.append(seed_z_noise.cpu().numpy())
+    predictions, _, _, _, y = model.inference(data=seed_z_noise, device=device, sample=False, log_var=None)
+
+    # check validity reencode and predict
+    prediction_strings_valid, validity, y_p_after_encoding_valid, all_reconstructions_valid =samples_handler.validcheck_reencode_predict(predictions)
+    y_p_GA=y.cpu().numpy().tolist()
+    print(y_p_after_encoding_valid)
 
 
+print(f'Saving generated strings')
+i=0
+with open(dir_name+'results_optimization_seed.txt', 'w') as f:
+    f.write("Seed string decoded: " + seed_string[0] + "\n")
+    f.write("Prediction: "+ str(y_p_after_encoding_seed[0]) + seed_rec[0])
+    f.write("The results, sampling around the best population are the following\n")
+    for l1,l2 in zip(all_reconstructions_valid,prediction_strings_valid):
+        if l1 == l2:
+            f.write("decoded molecule from GA selection is encoded and decoded to the same molecule\n")
+            f.write(l1 + "\n")
+            f.write("The predicted properties from z(GA) are: " + str(y_p_GA[i]) + ". The predicted properties from z(reencoded) are: " + str(y_p_after_encoding_valid[i]) + "\n")
+        else:
+            f.write("GA molecule: ")
+            f.write(l2 + "\n")
+            f.write("Encoded and decoded GA molecule: ")
+            f.write(l1 + "\n")
+            f.write("The predicted properties from z(GA) are: " + str(y_p_GA[i]) + ". The predicted properties from z(reencoded) are: " + str(y_p_after_encoding_valid[i]) + "\n")
+        i+=1
 
 """ 
 

@@ -25,3 +25,5 @@ pkg_download_dir/
 Checkpoints*
 Cluster_env*
 wandb*
+*.sh
+*.txt

@@ -27,7 +27,7 @@ from data_processing.rdkit_poly import make_polymer_mol
 
 # setting device on GPU if available, else CPU
 # setting device on GPU if available, else CPU
-#device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 device = torch.device('cpu')
 print('Using device:', device)
 print()
@@ -40,7 +40,7 @@ if device.type == 'cuda':
     print('Cached:   ', round(torch.cuda.memory_reserved(0)/1024**3, 1), 'GB')
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--augment", help="options: augmented, original, augmented_canonical", default="original", choices=["augmented", "augmented_old", "original", "augmented_canonical", "augmented_enum"])
+parser.add_argument("--augment", help="options: augmented, original, augmented_canonical", default="original", choices=["augmented", "original", "augmented_canonical", "augmented_enum"])
 parser.add_argument("--tokenization", help="options: oldtok, RT_tokenized", default="oldtok", choices=["oldtok", "RT_tokenized"])
 parser.add_argument("--embedding_dim", help="latent dimension (equals word embedding dimension in this model)", default=32)
 parser.add_argument("--beta", default=1, help="option: <any number>, schedule", choices=["normalVAE","schedule"])
@@ -193,7 +193,7 @@ def MP_Matrix_Creator(loader):
     return dict_graphs_w_matrix
 
 class PropertyPrediction():
-    def __init__(self, model, nr_vars):
+    def __init__(self, model, nr_vars, pca_transformation):
         self.model_predictor = model
         self.weight_electron_affinity = 1  # Adjust the weight for electron affinity
         self.weight_ionization_potential = 1  # Adjust the weight for ionization potential
@@ -202,6 +202,7 @@ class PropertyPrediction():
         self.results_custom = {}
         self.nr_vars = nr_vars
         self.eval_calls = 0
+        self.pca_transformation = pca_transformation
 
     def evaluate(self, **params):
         # Assuming x is a 1D array containing the 32 numerical parameters
@@ -212,7 +213,9 @@ class PropertyPrediction():
         print(params)
         _vector = [params[f'x{i}'] for i in range(self.nr_vars)]
         print(_vector)
-        x = torch.from_numpy(np.array(_vector)).to(device).to(torch.float32)
+        # Use the pca to inverse transform the points from BO to the latent dimension to then decode the points. 
+        _vector_latentDim = self.pca_transformation.inverse_transform(np.array(_vector))
+        x = torch.from_numpy(_vector_latentDim).to(device).to(torch.float32)
         with torch.no_grad():
             predictions, _, _, _, y = self.model_predictor.inference(data=x, device=device, sample=False, log_var=None)
         # Validity check of the decoded molecule + penalize invalid molecules
@@ -229,8 +232,9 @@ class PropertyPrediction():
         #print(dst)
         # Use the encoded and predicted properties as evaluation for GA (more realistic property prediction)
         #out["F"] = np.zeros((x.shape[0], 3)) # for three objectives (additionally minimze the distance of z vectors)
-        obj1 = self.weight_electron_affinity * expanded_y_p[~invalid_mask, 0]
-        obj2 = self.weight_ionization_potential * np.abs(expanded_y_p[~invalid_mask, 1] - 1)
+        #obj1 = self.weight_electron_affinity * expanded_y_p[~invalid_mask, 0]
+        obj1 = self.weight_electron_affinity * np.abs(y.cpu().numpy()[~invalid_mask, 0] + 2)
+        obj2 = self.weight_ionization_potential * np.abs(y.cpu().numpy()[~invalid_mask, 1] - 1.2)
         #latent_inconsistency = np.linalg.norm(x.detach().numpy()-expanded_z_p)
         #print(latent_inconsistency)
 
@@ -340,8 +344,22 @@ dir_name = os.path.join(main_dir_path,'Checkpoints/', model_name)
 
 with open(dir_name+'latent_space_'+dataset_type+'.npy', 'rb') as f:
     latent_space = np.load(f)
-min_values = np.amin(latent_space, axis=0).tolist()
-max_values = np.amax(latent_space, axis=0).tolist()
+
+# Perform PCA to reduce the dimensions with explained variance ratio 99.9%
+from sklearn.decomposition import PCA 
+pca = PCA()
+pca.fit(latent_space)
+cumulative_variance = np.cumsum(pca.explained_variance_ratio_)
+num_components = np.argmax(cumulative_variance >= 0.999) + 1
+print(f'Number of components to retain 99.9% variance: {num_components}')
+
+# Fit PCA with the optimal number of components
+pca_optimal = PCA(n_components=num_components)
+latent_space_reduced = pca_optimal.fit_transform(latent_space)
+
+
+min_values = np.amin(latent_space_reduced, axis=0).tolist()
+max_values = np.amax(latent_space_reduced, axis=0).tolist()
 
 cutoff=-0.05
 
@@ -363,24 +381,21 @@ elif cutoff==0:
 
 
 
-nr_vars = 32
-prop_predictor = PropertyPrediction(model, nr_vars)
-
+nr_vars = num_components
+prop_predictor = PropertyPrediction(model, nr_vars, pca_optimal)
+"""
 # Initialize BayesianOptimization
 optimizer = BayesianOptimization(f=prop_predictor.evaluate, pbounds=bounds)
-
 # Perform optimization
-# Perform optimization
-#utility = UtilityFunction(kind="ei", kappa=2.5, xi=0.01)
-utility = UtilityFunction(kind="ucb")
-
-optimizer.maximize(init_points=20, n_iter=500, acquisition_function=utility)
+utility = UtilityFunction(kind="ei", kappa=2.5, xi=0.005)
+optimizer.maximize(init_points=10, n_iter=200, acquisition_function=utility)
+#optimizer.maximize(init_points=10, n_iter=200)
 results = optimizer.res
 results_custom = prop_predictor.results_custom
 
-with open(dir_name+'optimization_results_'+str(cutoff)+'.pkl', 'wb') as f:
+with open(dir_name+'optimization_results_'+str(cutoff)+'_mimick_peak.pkl', 'wb') as f:
     pickle.dump(results, f)
-with open(dir_name+'optimization_results_custom_'+str(cutoff)+'.pkl', 'wb') as f:
+with open(dir_name+'optimization_results_custom_'+str(cutoff)+'_mimick_peak.pkl', 'wb') as f:
     pickle.dump(results_custom, f)
 
 
@@ -390,14 +405,14 @@ best_params = optimizer.max['params']
 best_objective = optimizer.max['target']
 
 print("Best Parameters:", best_params)
-print("Best Objective Value:", best_objective)
+print("Best Objective Value:", best_objective) """
 
-with open(dir_name+'optimization_results_'+str(cutoff)+'.pkl', 'rb') as f:
+with open(dir_name+'optimization_results_'+str(cutoff)+'_mimick_peak.pkl', 'rb') as f:
     results = pickle.load(f)
-with open(dir_name+'optimization_results_custom_'+str(cutoff)+'.pkl', 'rb') as f:
+with open(dir_name+'optimization_results_custom_'+str(cutoff)+'_mimick_peak.pkl', 'rb') as f:
     results_custom = pickle.load(f)
 
-with open(dir_name+'optimization_results_custom_'+str(cutoff)+'.txt', 'w') as fl:
+with open(dir_name+'optimization_results_custom_'+str(cutoff)+'_mimick_peak.txt', 'w') as fl:
      print(results_custom, file=fl)
 #print(results_custom)
 # Calculate distances between the BO and reencoded latents
@@ -413,8 +428,6 @@ for eval, res in results_custom.items():
     eval_int= int(eval)
     L_bo= res["latents_BO"].detach().numpy()
     L_re=res["latents_reencoded"][0]
-    print(L_bo)
-    print(L_re)
     latent_inconsistency = np.linalg.norm(L_bo-L_re)
     latent_inconsistencies.append(latent_inconsistency)
     Latents_BO.append(L_bo)
@@ -445,8 +458,6 @@ def distance_matrix(arrays):
 
 dist_matrix_zBO, mBO, sBO=distance_matrix(Latents_BO)
 dist_matrix_zRE, mRE, sRE=distance_matrix(Latents_RE)
-print(mBO, sBO)
-print(mRE, sRE)
 print(np.mean(latent_inconsistencies), np.std(latent_inconsistencies))
 
 import matplotlib.pyplot as plt
@@ -469,7 +480,7 @@ plt.plot(iterations, IP_re, label='IP (RE)')
 plt.xlabel('Index')
 plt.ylabel('Value')
 plt.legend()
-plt.savefig(dir_name+'BO_objectives_'+str(cutoff)+'.png',  dpi=300)
+plt.savefig(dir_name+'BO_objectives_'+str(cutoff)+'_mimick_peak.png',  dpi=300)
 plt.close()
 
 
@@ -504,7 +515,7 @@ clb = plt.colorbar()
 clb.ax.set_title('Electron affinity')
 plt.scatter(z_embedded_BO[:, 0], z_embedded_BO[:, 1], s=2, c='black')
 plt.scatter(z_embedded_RE[:, 0], z_embedded_RE[:, 1], s=2, c='red')
-plt.savefig(dir_name+'BO_projected_to_pca_'+str(cutoff)+'.png',  dpi=300)
+plt.savefig(dir_name+'BO_projected_to_pca_'+str(cutoff)+'_mimick_peak.png',  dpi=300)
 plt.close()
 #pca = PCA(n_components=2)
 
@@ -539,7 +550,7 @@ def top_n_molecule_indices(objective_values, n_idx=10):
     return top_idxs
 
 # Extract data for the curves
-objective_values = [-(arr[0]+np.abs(arr[1]-1)) for arr in pred_RE]
+objective_values = [-(np.abs(arr[0]+2)+np.abs(arr[1]-1.2)) for arr in pred_BO]
 indices_of_increases = indices_of_improvement(objective_values)
 
 EA_bo_imp = [EA_bo[i] for i in indices_of_increases]
@@ -550,22 +561,20 @@ best_z_re = [Latents_RE[i] for i in indices_of_increases]
 best_mols = {i+1: decoded_mols[i] for i in indices_of_increases}
 best_props = {i+1: [EA_re[i], EA_bo[i], IP_re[i], IP_bo[i]] for i in indices_of_increases}
 best_mols_rec = {i+1: rec_mols[i] for i in indices_of_increases}
-with open(dir_name+'best_mols_'+str(cutoff)+'.txt', 'w') as fl:
+with open(dir_name+'best_mols_'+str(cutoff)+'_mimick_peak.txt', 'w') as fl:
     print(best_mols, file=fl)
     print(best_props, file=fl)
-with open(dir_name+'best_recon_mols_'+str(cutoff)+'.txt', 'w') as fl:
+with open(dir_name+'best_recon_mols_'+str(cutoff)+'_mimick_peak.txt', 'w') as fl:
     print(best_mols_rec, file=fl)
 
 top_20_indices = top_n_molecule_indices(objective_values, n_idx=20)
 best_mols_t20 = {i+1: decoded_mols[i] for i in top_20_indices}
 best_props_t20 = {i+1: [EA_re[i], EA_bo[i], IP_re[i], IP_bo[i]] for i in top_20_indices}
-with open(dir_name+'top20_mols_'+str(cutoff)+'.txt', 'w') as fl:
+with open(dir_name+'top20_mols_'+str(cutoff)+'_mimick_peak.txt', 'w') as fl:
     print(best_mols_t20, file=fl)
     print(best_props_t20, file=fl)
 
 
-print(objective_values)
-print(indices_of_improvement)
 latents_BO_np_imp = np.stack([Latents_BO[i] for i in indices_of_increases])
 z_embedded_BO_imp = reducer.transform(latents_BO_np_imp)
 
@@ -611,7 +620,7 @@ plt.xlabel('pc1')
 plt.ylabel('pc2')
 plt.title('Optimization in latent space')
 
-plt.savefig(dir_name+'BO_imp_projected_to_pca_'+str(cutoff)+'.png',  dpi=300)
+plt.savefig(dir_name+'BO_imp_projected_to_pca_'+str(cutoff)+'_mimick_peak.png',  dpi=300)
 
 plt.figure(3)
 
@@ -639,11 +648,11 @@ plt.xlabel('pc1')
 plt.ylabel('pc2')
 plt.title('Optimization in latent space')
 
-plt.savefig(dir_name+'BO_imp_projected_to_pca_onlyred_'+str(cutoff)+'.png',  dpi=300)
+plt.savefig(dir_name+'BO_imp_projected_to_pca_onlyred_'+str(cutoff)+'_mimick_peak.png',  dpi=300)
 
 
 
-""" Sample around seed molecule - seed being the optimal solution found by optimizer """
+### Sample around seed molecule - seed being the optimal solution found by optimizer
 # Sample around the optimal molecule and predict the property values
 
 all_prediction_strings=[]
@@ -671,7 +680,7 @@ with torch.no_grad():
         # Add the noise to the original tensor
         seed_z_noise = seed_z + noise
         sampled_z.append(seed_z_noise.cpu().numpy())
-        predictions, _, _, _, y = model.inference(data=seed_z_noise, device=device, sample=False, log_var=None)
+        predictions, _, _, _, y = model.inference(data=seed_z_noise, device=device, sample=False)
         prediction_strings, validity = prop_predictor._calc_validity(predictions)
         predictions_valid = [j for j, valid in zip(predictions, validity) if valid]
         prediction_strings_valid = [j for j, valid in zip(prediction_strings, validity) if valid]
@@ -683,7 +692,7 @@ with torch.no_grad():
 
 print(f'Saving generated strings')
 i=0
-with open(dir_name+'results_around_BO_seed_'+str(cutoff)+'.txt', 'w') as f:
+with open(dir_name+'results_around_BO_seed_'+str(cutoff)+'_mimick_peak.txt', 'w') as f:
     f.write("Seed string decoded: " + seed_string[0] + "\n")
     f.write("Prediction: "+ str(y_seed[0]))
     f.write("The results, sampling around the best population are the following\n")
@@ -700,7 +709,7 @@ with open(dir_name+'results_around_BO_seed_'+str(cutoff)+'.txt', 'w') as f:
             f.write("The predicted properties from z(reencoded) are: " + str(all_y_p[i]) + "\n")
         i+=1
 
-""" Check the molecules around the optimized seed """
+### Check the molecules around the optimized seed
 
 def poly_smiles_to_molecule(poly_input):
     '''
@@ -728,48 +737,6 @@ prediction_validityA= []
 prediction_validityB =[]
 data_dir = os.path.join(main_dir_path,'data/')
 
-
-"""
-if augment=="augmented":
-    df = pd.read_csv(main_dir_path+'/data/dataset-combined-poly_chemprop_v2.csv')
-elif augment=="augmented_canonical":
-    df = pd.read_csv(main_dir_path+'/data/dataset-combined-canonical-poly_chemprop.csv')
-elif augment=="augmented_enum":
-    df = pd.read_csv(main_dir_path+'/data/dataset-combined-enumerated2_poly_chemprop.csv')
-all_polymers_data= []
-all_train_polymers = []
-
-for batch, graphs in enumerate(dict_train_loader):
-    data = dict_train_loader[str(batch)][0]
-    train_polymers_batch = [combine_tokens(tokenids_to_vocab(data.tgt_token_ids[sample], vocab), tokenization=tokenization).split('_')[0] for sample in range(len(data))]
-    all_train_polymers.extend(train_polymers_batch)
-for i in range(len(df.loc[:, 'poly_chemprop_input'])):
-    poly_input = df.loc[i, 'poly_chemprop_input']
-    all_polymers_data.append(poly_input)
-
- 
-all_predictions_can = list(map(sm_can.canonicalize, all_predictions))
-all_train_can = list(map(sm_can.canonicalize, all_train_polymers))
-all_pols_data_can = list(map(sm_can.canonicalize, all_polymers_data))
-monomers= [s.split("|")[0].split(".") for s in all_train_polymers]
-monomers_all=[mon for sub_list in monomers for mon in sub_list]
-all_mons_can = []
-for m in monomers_all:
-    m_can = sm_can.canonicalize(m, monomer_only=True, stoich_con_info=False)
-    modified_string = re.sub(r'\*\:\d+', '*', m_can)
-    all_mons_can.append(modified_string)
-all_mons_can = list(set(all_mons_can))
-print(len(all_mons_can), all_mons_can[1:3])
-
-
-
-
-with open(data_dir+'all_train_pols_can'+'.pkl', 'wb') as f:
-    pickle.dump(all_train_can, f)
-with open(data_dir+'all_pols_data_can'+'.pkl', 'wb') as f:
-    pickle.dump(all_pols_data_can, f)
-with open(data_dir+'all_mons_train_can'+'.pkl', 'wb') as f:
-    pickle.dump(all_mons_can, f) """
 
 with open(data_dir+'all_train_pols_can'+'.pkl', 'rb') as f:
     all_train_can = pickle.load(f)
@@ -875,7 +842,7 @@ classes_stoich = [['0.5','0.5'],['0.25','0.75'],['0.75','0.25']]
 classes_con = ['<1-3:0.25:0.25<1-4:0.25:0.25<2-3:0.25:0.25<2-4:0.25:0.25<1-2:0.25:0.25<3-4:0.25:0.25<1-1:0.25:0.25<2-2:0.25:0.25<3-3:0.25:0.25<4-4:0.25:0.25','<1-3:0.5:0.5<1-4:0.5:0.5<2-3:0.5:0.5<2-4:0.5:0.5','<1-2:0.375:0.375<1-1:0.375:0.375<2-2:0.375:0.375<3-4:0.375:0.375<3-3:0.375:0.375<4-4:0.125:0.125<1-3:0.125:0.125<1-4:0.125:0.125<2-3:0.125:0.125<2-4:0.125:0.125']
 whole_valid = len(monomer_smiles_predicted)
 validity = whole_valid/len(all_predictions)
-with open(dir_name+'novelty_BO_seed.txt', 'w') as f:
+with open(dir_name+'novelty_BO_seed_mimick_peak.txt', 'w') as f:
     f.write("Gen Mon A validity: %.4f %% Gen Mon B validity: %.4f %% "% (100*validityA, 100*validityB,))
     f.write("Gen validity: %.4f %% "% (100*validity,))
     f.write("Novelty: %.4f %% "% (100*novelty,))
@@ -886,8 +853,8 @@ with open(dir_name+'novelty_BO_seed.txt', 'w') as f:
     f.write("Diversity: %.4f %% "% (100*diversity,))
     f.write("Diversity (novel polymers): %.4f %% "% (100*diversity_novel,))
 
+### Plot the kde of the properties of training data and sampled data ###
 
-""" Plot the kde of the properties of training data and sampled data """
 from sklearn.neighbors import KernelDensity
 
 with open(dir_name+'y1_all_'+dataset_type+'.npy', 'rb') as f:
@@ -904,7 +871,7 @@ yp2_all = [yp[1] for yp in yp_all]
 yp1_all_seed = [yp[0] for yp in all_y_p]
 yp2_all_seed = [yp[1] for yp in all_y_p]
 # Do a KDE to check if the distributions of properties are similar (predicted vs. real lables)
-""" y1 """
+### y1
 plt.figure(4)
 real_distribution = np.array([r for r in y1_all if not np.isnan(r)])
 augmented_distribution = np.array([p for p in yp1_all])
@@ -946,9 +913,9 @@ plt.ylabel('Density')
 plt.title('Kernel Density Estimation (Electron affinity)')
 plt.legend()
 plt.show()
-plt.savefig(dir_name+'KDEy1_BO_seed.png')
+plt.savefig(dir_name+'KDEy1_BO_seed_mimick_peak.png')
 
-""" y2 """
+### y2 
 plt.figure(5)
 real_distribution = np.array([r for r in y2_all if not np.isnan(r)])
 augmented_distribution = np.array([p for p in yp2_all])
@@ -989,4 +956,4 @@ plt.ylabel('Density')
 plt.title('Kernel Density Estimation (Ionization potential)')
 plt.legend()
 plt.show()
-plt.savefig(dir_name+'KDEy2_BO_seed.png')
+plt.savefig(dir_name+'KDEy2_BO_seed_mimick_peak.png')

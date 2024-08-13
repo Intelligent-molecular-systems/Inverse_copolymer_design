@@ -6,22 +6,28 @@ from data_processing.data_utils import *
 from data_processing.rdkit_poly import *
 from model.G2S_clean import *
 
+from model.G2S_clean import *
+from data_processing.data_utils import *
+from data_processing.Function_Featurization_Own import poly_smiles_to_graph
+
+
 import time
 from datetime import datetime
 import random
 # deep learning packages
+from torch_geometric.loader import DataLoader
 import torch
 from statistics import mean
 import numpy as np
-from sklearn.manifold import TSNE
-from sklearn.decomposition import PCA
+#from sklearn.manifold import TSNE
+#from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
-from matplotlib.colors import LinearSegmentedColormap
+#from matplotlib.colors import LinearSegmentedColormap
 import pickle
-import umap
+#import umap
 from mpl_toolkits.mplot3d import Axes3D
 import argparse
-from sklearn.neighbors import KernelDensity
+#from sklearn.neighbors import KernelDensity
 
 
 
@@ -54,8 +60,9 @@ parser.add_argument("--initialization", default="random", choices=["random", "xa
 parser.add_argument("--add_latent", type=int, default=1)
 parser.add_argument("--ppguided", type=int, default=0)
 parser.add_argument("--dec_layers", type=int, default=4)
-parser.add_argument("--max_beta", type=float, default=1.0)
-parser.add_argument("--epsilon", type=float, default=0.01)
+parser.add_argument("--max_beta", type=float, default=0.01)
+parser.add_argument("--max_alpha", type=float, default=0.1)
+parser.add_argument("--epsilon", type=float, default=1)
 
 
 args = parser.parse_args()
@@ -68,17 +75,17 @@ if args.add_latent ==1:
 elif args.add_latent ==0:
     add_latent=False
 
-"""
-dataset_type = "train"
+dataset_type = "train" 
 data_augment = "old" # new or old
 dict_train_loader = torch.load(main_dir_path+'/data/dict_train_loader_'+augment+'_'+tokenization+'.pt')
 
+num_node_features = dict_train_loader['0'][0].num_node_features
+num_edge_features = dict_train_loader['0'][0].num_edge_features
 
-vocab_file=main_dir_path+'/data/poly_smiles_vocab_'+augment+'_'+tokenization+'.txt'
-vocab = load_vocab(vocab_file=vocab_file)
-
-# Directory to save results
-model_name = 'Model_'+data_augment+'data_DecL='+str(args.dec_layers)+'_beta='+str(args.beta)+'_maxbeta='+str(args.max_beta)+'eps='+str(args.epsilon)+'_loss='+str(args.loss)+'_augment='+str(args.augment)+'_tokenization='+str(args.tokenization)+'_AE_warmup='+str(args.AE_Warmup)+'_init='+str(args.initialization)+'_seed='+str(args.seed)+'_add_latent='+str(add_latent)+'_pp-guided='+str(args.ppguided)+'/'
+# Load model
+# Create an instance of the G2S model from checkpoint
+model_name = 'Model_'+data_augment+'data_DecL='+str(args.dec_layers)+'_beta='+str(args.beta)+'_maxbeta='+str(args.max_beta)+'_maxalpha='+str(args.max_alpha)+'eps='+str(args.epsilon)+'_loss='+str(args.loss)+'_augment='+str(args.augment)+'_tokenization='+str(args.tokenization)+'_AE_warmup='+str(args.AE_Warmup)+'_init='+str(args.initialization)+'_seed='+str(args.seed)+'_add_latent='+str(add_latent)+'_pp-guided='+str(args.ppguided)+'/'
+filepath = os.path.join(main_dir_path,'Checkpoints/', model_name,"model_best_loss.pt")
 dir_name = os.path.join(main_dir_path,'Checkpoints/', model_name)
 if not os.path.exists(dir_name):
     os.makedirs(dir_name)
@@ -91,7 +98,7 @@ with open(dir_name+'latent_space_'+dataset_type+'.npy', 'rb') as f:
 
 
 
-
+""" 
 # Define bandwidth (bandwidth controls the smoothness of the kernel density estimate)
 bandwidth = 0.1
 
@@ -116,7 +123,7 @@ plt.ylabel('Density')
 plt.title('Kernel Density Estimation (Electron affinity)')
 plt.legend()
 plt.show()
-plt.savefig(dir_name+'latentdims_kde.png')
+plt.savefig(dir_name+'latentdims_kde.png') """
 
 
 # Plot EA vs IP
@@ -133,18 +140,59 @@ yp2_all = [yp[1] for yp in yp_all]
 
 # PLOTS
 plt.figure(2)
-plt.scatter(y1_all, y2_all, s=1)
-plt.title('IP vs. EA (training data)')
-plt.xlabel("EA in eV")
-plt.ylabel("IP in eV")
-plt.savefig(dir_name+'IPvsEA.png')
+font = {'size'   : 18}
+import matplotlib
+matplotlib.rc('font', **font)
+# Convert lists to numpy arrays
+
+array1 = np.array(y1_all)
+array2 = np.array(y2_all)
+# Create a boolean mask identifying NaN values
+nan_mask = np.isnan(array1)
+non_nan_mask = ~nan_mask
+
+# Use the mask to filter the array
+array1 = array1[non_nan_mask]
+array2 = array2[non_nan_mask]
+
+# Calculate the objective values
+#obj_vals = array1 + np.abs(array2 - 1.0)#
+obj_vals = np.abs(array1 + 2.0) +  np.abs(array2 - 1.2)
+
+print(obj_vals)
+# Create the scatter plot
+plt.scatter(array1, array2, c=obj_vals, cmap='inferno', s=1)
+
+cwd = os.getcwd()
+
+# Add a colorbar
+plt.colorbar(label=r'Objective: $\mathit{f}(\mathbf{z})$')
+plt.title(r'$\mathit{IP}$ vs. $\mathit{EA}$ (training data)')
+plt.xlabel(r'$\mathit{EA}$ in eV')
+plt.ylabel(r'$\mathit{IP}$ in eV')
+plt.subplots_adjust(bottom=0.15)
+plt.savefig(cwd+'IPvsEA_mimickpeak.png')
+
+# What are the best objective values
+# Number of largest elements to print
+N = 10
+
+# Get the indices that would sort the array in descending order
+sorted_indices = np.argsort(obj_vals)
+
+
+# Select the top N elements using the sorted indices
+smallest_elements = obj_vals[sorted_indices][:N]
+print(smallest_elements, np.mean(smallest_elements))
+
 
 plt.figure(3)
 plt.scatter(yp1_all, yp2_all, s=1)
 plt.title('IP vs. EA (augmented data)')
 plt.xlabel("EA in eV")
 plt.ylabel("IP in eV")
-plt.savefig(dir_name+'IPvsEA_pred.png')
+plt.savefig(cwd+'IPvsEA_mimickpeak_pred.png')
+""" 
 with open(dir_name+'monomers_'+dataset_type, "rb") as f:   # Unpickling
     monomers = pickle.load(f)
 # Get all the A monomers and create monomer label list samples x 1
@@ -157,7 +205,7 @@ for b in monomers:
 
 unique_A_monomers = list(set(monomersA.values()))
 print(unique_A_monomers)
-print(len(unique_A_monomers)) """
+print(len(unique_A_monomers))
 
 graph_list = torch.load(main_dir_path+'/data/Graphs_list_augmented_RT_tokenized.pt')
 
@@ -205,4 +253,5 @@ for s in monomers:
 
 unique_A_monomers = list(set(monomersA))
 print(unique_A_monomers)
-print(len(unique_A_monomers))
+print(len(unique_A_monomers)) """
+

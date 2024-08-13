@@ -33,7 +33,7 @@ if device.type == 'cuda':
     print('Cached:   ', round(torch.cuda.memory_reserved(0)/1024**3, 1), 'GB')
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--augment", help="options: augmented, original, augmented_canonical", default="original", choices=["augmented", "original", "augmented_canonical", "augmented_enum"])
+parser.add_argument("--augment", help="options: augmented, original, augmented_canonical", default="augmented", choices=["augmented", "original", "augmented_canonical", "augmented_enum", "augmented_old"])
 parser.add_argument("--tokenization", help="options: oldtok, RT_tokenized", default="oldtok", choices=["oldtok", "RT_tokenized"])
 parser.add_argument("--embedding_dim", help="latent dimension (equals word embedding dimension in this model)", default=32)
 parser.add_argument("--beta", default=1, help="option: <any number>, schedule", choices=["normalVAE","schedule"])
@@ -45,6 +45,7 @@ parser.add_argument("--add_latent", type=int, default=1)
 parser.add_argument("--ppguided", type=int, default=0)
 parser.add_argument("--dec_layers", type=int, default=4)
 parser.add_argument("--max_beta", type=float, default=0.01)
+parser.add_argument("--max_alpha", type=float, default=0.1)
 parser.add_argument("--epsilon", type=float, default=1)
 
 
@@ -69,7 +70,7 @@ num_edge_features = dict_train_loader['0'][0].num_edge_features
 
 # Load model
 # Create an instance of the G2S model from checkpoint
-model_name = 'Model_'+data_augment+'data_DecL='+str(args.dec_layers)+'_beta='+str(args.beta)+'_maxbeta='+str(args.max_beta)+'eps='+str(args.epsilon)+'_loss='+str(args.loss)+'_augment='+str(args.augment)+'_tokenization='+str(args.tokenization)+'_AE_warmup='+str(args.AE_Warmup)+'_init='+str(args.initialization)+'_seed='+str(args.seed)+'_add_latent='+str(add_latent)+'_pp-guided='+str(args.ppguided)+'/'
+model_name = 'Model_'+data_augment+'data_DecL='+str(args.dec_layers)+'_beta='+str(args.beta)+'_maxbeta='+str(args.max_beta)+'_maxalpha='+str(args.max_alpha)+'eps='+str(args.epsilon)+'_loss='+str(args.loss)+'_augment='+str(args.augment)+'_tokenization='+str(args.tokenization)+'_AE_warmup='+str(args.AE_Warmup)+'_init='+str(args.initialization)+'_seed='+str(args.seed)+'_add_latent='+str(add_latent)+'_pp-guided='+str(args.ppguided)+'/'
 filepath = os.path.join(main_dir_path,'Checkpoints/', model_name,"model_best_loss.pt")
 if os.path.isfile(filepath):
     if args.ppguided:
@@ -119,7 +120,7 @@ if os.path.isfile(filepath):
     connectivity_pattern = []
     with torch.no_grad():
         for i, batch in enumerate(batches):
-            if augment=='augmented' and dataset_type=='train': # otherwise it takes to long for train dataset
+            if (augment=='augmented' or augment=="augmented_old") and dataset_type=='train': # otherwise it takes to long for train dataset
                 if i>=500: 
                     break
             data = dict_train_loader[str(batch)][0]
@@ -199,7 +200,7 @@ if os.path.isfile(filepath):
     connectivity_pattern = []
     with torch.no_grad():
         for i, batch in enumerate(batches):
-            if augment=='augmented' and dataset_type=='train': # otherwise it takes to long for train dataset
+            if (augment=='augmented' or augment=="augmented_old") and dataset_type=='train': # otherwise it takes to long for train dataset
                 if i>=500: 
                     break
             data = dict_train_loader[str(batch)][0]

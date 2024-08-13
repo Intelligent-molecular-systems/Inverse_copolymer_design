@@ -148,7 +148,7 @@ if device.type == 'cuda':
     print('Cached:   ', round(torch.cuda.memory_reserved(0)/1024**3, 1), 'GB')
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--augment", help="options: augmented, original, augmented_canonical", default="original", choices=["augmented", "original", "augmented_canonical", "augmented_enum"])
+parser.add_argument("--augment", help="options: augmented, original, augmented_canonical", default="augmented", choices=["augmented", "original", "augmented_canonical", "augmented_enum", "augmented_old"])
 parser.add_argument("--tokenization", help="options: oldtok, RT_tokenized", default="oldtok", choices=["oldtok", "RT_tokenized"])
 parser.add_argument("--embedding_dim", help="latent dimension (equals word embedding dimension in this model)", default=32)
 parser.add_argument("--beta", default=1, help="option: <any number>, schedule", choices=["normalVAE","schedule"])
@@ -276,7 +276,7 @@ optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 # Early stopping callback
 # Log directory creation
 data_augment="old"
-model_name = 'Model_'+data_augment+'data_DecL='+str(args.dec_layers)+'_beta='+str(args.beta)+'_maxbeta='+str(args.max_beta)+'eps='+str(args.epsilon)+'_loss='+str(args.loss)+'_augment='+str(args.augment)+'_tokenization='+str(args.tokenization)+'_AE_warmup='+str(args.AE_Warmup)+'_init='+str(args.initialization)+'_seed='+str(args.seed)+'_add_latent='+str(add_latent)+'_pp-guided='+str(args.ppguided)+'/'
+model_name = 'Model_'+data_augment+'data_DecL='+str(args.dec_layers)+'_beta='+str(args.beta)+'_maxbeta='+str(args.max_beta)+'_maxalpha='+str(args.max_alpha)+'eps='+str(args.epsilon)+'_loss='+str(args.loss)+'_augment='+str(args.augment)+'_tokenization='+str(args.tokenization)+'_AE_warmup='+str(args.AE_Warmup)+'_init='+str(args.initialization)+'_seed='+str(args.seed)+'_add_latent='+str(add_latent)+'_pp-guided='+str(args.ppguided)+'/'
 directory_path = os.path.join(main_dir_path,'Checkpoints/', model_name)
 if not os.path.exists(directory_path):
     os.makedirs(directory_path)
@@ -286,26 +286,26 @@ earlystopping = EarlyStopping(dir=directory_path, patience=es_patience)
 
 print(f'STARTING TRAINING')
 # Prepare dictionaries for training or load checkpoint
-if os.path.isfile(os.path.join(directory_path,"model_best_loss.pt")):
-    print("Loading model from checkpoint")
-
-    checkpoint = torch.load(os.path.join(directory_path,"model_best_loss.pt"))
-    model.load_state_dict(checkpoint['model_state_dict'])
-    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-    epoch_cp = checkpoint['epoch']
-    train_loss_dict = checkpoint['loss_dict']
-    val_loss_dict = checkpoint['val_loss_dict']
-    if model_config['beta'] == "schedule":
-        global_step = checkpoint['global_step']
-        monotonic_step = checkpoint['monotonic_step']
-        model.beta =  model_config['max_beta']
+#if os.path.isfile(os.path.join(directory_path,"model_best_loss.pt")):
+#    print("Loading model from checkpoint")
+#
+#    checkpoint = torch.load(os.path.join(directory_path,"model_best_loss.pt"))
+#    model.load_state_dict(checkpoint['model_state_dict'])
+#    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+#    epoch_cp = checkpoint['epoch']
+#    train_loss_dict = checkpoint['loss_dict']
+#    val_loss_dict = checkpoint['val_loss_dict']
+#    if model_config['beta'] == "schedule":
+#        global_step = checkpoint['global_step']
+#        monotonic_step = checkpoint['monotonic_step']
+#        model.beta =  model_config['max_beta']
         #monotonic_step = 0
-else: 
-    train_loss_dict = {}
-    val_loss_dict = {}
-    epoch_cp = 0
-    global_step = 0
-    monotonic_step = 0
+#else: 
+train_loss_dict = {}
+val_loss_dict = {}
+epoch_cp = 0
+global_step = 0
+monotonic_step = 0
 
 
 

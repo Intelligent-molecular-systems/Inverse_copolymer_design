@@ -21,7 +21,7 @@ import argparse
 device = 'cpu'
 # %% Call data
 parser = argparse.ArgumentParser()
-parser.add_argument("--augment", help="options: augmented, original, augmented_canonical", default="augmented", choices=["augmented", "original", "augmented_canonical", "augmented_enum"])
+parser.add_argument("--augment", help="options: augmented, original, augmented_canonical", default="augmented", choices=["augmented", "original", "augmented_canonical", "augmented_enum", "augmented_old"])
 parser.add_argument("--batch_size", type=int, default=64)
 
 
@@ -43,6 +43,8 @@ elif augment == "augmented_canonical":
     df = pd.read_csv(main_dir_path+'/data/dataset-combined-canonical-poly_chemprop.csv')
 elif augment == "augmented":
     df = pd.read_csv(main_dir_path+'/data/dataset-combined-poly_chemprop_v2.csv')
+elif augment == "augmented_old":
+    df = pd.read_csv(main_dir_path+'/data/dataset-combined-poly_chemprop.csv')
 # %% Lets create PyG data objects
 
 # uncomment if graphs_list.pt does not exist
@@ -241,6 +243,63 @@ elif augment == "augmented":
     print(f'Number of training graphs: {len(train_datalist)}')
     print(f'Number of test graphs: {len(test_datalist)}')
 
+elif augment == "augmented_old":
+    Graphs_list = torch.load(main_dir_path+'/data/Graphs_list_original'+'_'+tokenization+'.pt')
+    Graphs_list_combined = torch.load(main_dir_path+'/data/Graphs_list_'+augment+'_'+tokenization+'.pt')
+    org_polymers = Graphs_list_combined[:len(Graphs_list)]
+    augm_polymers = Graphs_list_combined[len(Graphs_list):] 
+    mon_combs=[]
+    # go through original data
+    for graph in org_polymers:
+        mon_combs.append(".".join(graph.monomer_smiles))
+
+    mon_combs= list(set(mon_combs))
+    mon_combs_shuffle = random.sample(mon_combs, len(mon_combs))
+    # take 80-20 split for trainig -  test data
+    train_mon_combs = mon_combs_shuffle[:int(0.8*len(mon_combs_shuffle))]
+    val_mon_combs = mon_combs_shuffle[int(0.8*len(mon_combs_shuffle)):int(0.9*len(mon_combs_shuffle))]
+    test_mon_combs = mon_combs_shuffle[int(0.9*len(mon_combs_shuffle)):]
+
+    train_datalist=[]
+    val_datalist=[]
+    test_datalist=[]
+    for graph in org_polymers: 
+        if ".".join(graph.monomer_smiles) in train_mon_combs:
+            train_datalist.append(graph)
+        elif ".".join(graph.monomer_smiles) in val_mon_combs:
+            val_datalist.append(graph)
+        elif ".".join(graph.monomer_smiles) in test_mon_combs:
+            test_datalist.append(graph)
+
+    # go through the augmented data 
+    mon_combs_new=[]
+    for graph in augm_polymers:
+        if not ".".join(graph.monomer_smiles) in mon_combs:
+            # only monomer combinations that have not been seen in the original dataset
+            mon_combs_new.append(".".join(graph.monomer_smiles))
+        # Check that the same monomer combinations are not in train and testset
+
+
+
+    mon_combs_augm= list(set(mon_combs_new))
+    mon_combs_augm_shuffle = random.sample(mon_combs_augm, len(mon_combs_augm))
+    train_mon_combs_augm = mon_combs_augm_shuffle[:int(0.9*len(mon_combs_augm_shuffle))]
+    val_mon_combs_augm = mon_combs_augm_shuffle[int(0.9*len(mon_combs_augm_shuffle)):int(0.95*len(mon_combs_augm_shuffle))]
+    test_mon_combs_augm = mon_combs_augm_shuffle[int(0.95*len(mon_combs_augm_shuffle)):]
+
+    for graph in augm_polymers: 
+        if ".".join(graph.monomer_smiles) in train_mon_combs_augm:
+            train_datalist.append(graph)
+        elif ".".join(graph.monomer_smiles) in val_mon_combs_augm:
+            val_datalist.append(graph)
+        elif ".".join(graph.monomer_smiles) in test_mon_combs_augm:
+            test_datalist.append(graph)
+
+    # print some statistics
+    print(f'Number of training graphs: {len(train_datalist)}')
+    print(f'Number of test graphs: {len(test_datalist)}')
+
+
 num_node_features = train_datalist[0].num_node_features
 num_edge_features = train_datalist[0].num_edge_features
 print(f'Number of node feautres: {num_node_features}')
@@ -368,7 +427,6 @@ dict_train_loader = MP_Matrix_Creator(train_loader)
 torch.save(dict_train_loader, main_dir_path+'/data/dict_train_loader_'+augment+'_'+tokenization+'.pt')
 dict_val_loader = MP_Matrix_Creator(val_loader)
 torch.save(dict_val_loader, main_dir_path+'/data/dict_val_loader_'+augment+'_'+tokenization+'.pt')
-# %% Create dictionary with bathed graphs and message passing matrices for test set
 dict_test_loader = MP_Matrix_Creator(test_loader)
 torch.save(dict_test_loader, main_dir_path+'/data/dict_test_loader_'+augment+'_'+tokenization+'.pt')
 

@@ -605,8 +605,8 @@ class G2S_VAE_PPguided(nn.Module):
             self.lincompress = Linear(self.hidden_dim, self.embedding_dim).to(device)
         
         self.pp_ffn_hidden = 56
-        #self.alpha = model_config['max_alpha']
-        self.alpha=0.1
+        self.alpha = model_config['max_alpha']
+        #self.alpha=0.1
         #self.max_n=data_config['max_num_nodes']
         self.PP_lin1 = Sequential(Linear(embedding_dim, self.pp_ffn_hidden), ReLU(), ).to(device)
         self.PP_lin2 = Sequential(Linear(self.pp_ffn_hidden, 2)).to(device)
@@ -619,7 +619,14 @@ class G2S_VAE_PPguided(nn.Module):
             eps = torch.randn_like(std) * eps_scale
             return eps.mul(std).add_(mean)
         else:
-            return mean        
+            return mean
+
+    def sample_inference(self, mean, log_var, eps_scale=1):
+        
+        std = log_var.mul(0.5).exp_()
+        eps = torch.randn_like(std) * eps_scale
+        return eps.mul(std).add_(mean)   
+
 
     def forward(self, batch_list, dest_is_origin_matrix, inc_edges_to_atom_matrix, device):
         # encode
@@ -670,7 +677,7 @@ class G2S_VAE_PPguided(nn.Module):
                 log_var = self.lincompress(log_var)
            
         if sample:
-            z= self.sample(mean, log_var, eps_scale=self.eps)
+            z= self.sample_inference(mean, log_var, eps_scale=self.eps)
         else:
             z= mean
             log_var = 0

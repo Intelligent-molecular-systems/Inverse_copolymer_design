@@ -21,7 +21,7 @@ import argparse
 device = 'cpu'
 # %% Call data
 parser = argparse.ArgumentParser()
-parser.add_argument("--augment", help="options: augmented, original, augmented_canonical", default="augmented", choices=["augmented", "original", "augmented_canonical", "augmented_enum", "augmented_old"])
+parser.add_argument("--augment", help="options: augmented, original", default="augmented", choices=["augmented", "original"])
 parser.add_argument("--batch_size", type=int, default=64)
 
 
@@ -29,21 +29,12 @@ args = parser.parse_args()
 
 augment = args.augment
 batch_size = args.batch_size
-
-tokenization = "RT_tokenized"
+tokenization = "RT_tokenized" # oldtok is the old tokenization scheme without numerical tokens
 string_format = "poly_chemprop" # "poly_chemprop" or "gbigsmileslike"
 smiles_enumeration = True
-if augment == "augmented_enum":
-    df = pd.read_csv(main_dir_path+'/data/dataset-combined-enumerated2-poly_chemprop.csv')
-elif augment == "original":
+if augment == "original":
     df = pd.read_csv(main_dir_path+'/data/dataset-poly_chemprop.csv')
-elif augment == "original_canonical":
-    df = pd.read_csv(main_dir_path+'/data/dataset-poly_chemprop_canonical.csv')
-elif augment == "augmented_canonical":
-    df = pd.read_csv(main_dir_path+'/data/dataset-combined-canonical-poly_chemprop.csv')
 elif augment == "augmented":
-    df = pd.read_csv(main_dir_path+'/data/dataset-combined-poly_chemprop_v2.csv')
-elif augment == "augmented_old":
     df = pd.read_csv(main_dir_path+'/data/dataset-combined-poly_chemprop.csv')
 # %% Lets create PyG data objects
 
@@ -101,7 +92,7 @@ torch.save(Graphs_list, main_dir_path+'/data/Graphs_list_'+augment+'_'+tokenizat
 # shuffle graphs
 # we first take out the validation and test set from 
 random.seed(12345)
-if augment == "original" or augment=="original_canonical":
+if augment == "original":
     # new improved test set: exclude monomer combinations completely
     mon_combs = []
     monB_list = []
@@ -138,59 +129,7 @@ if augment == "original" or augment=="original_canonical":
     print(f'Number of training graphs: {len(train_datalist)}')
     print(f'Number of test graphs: {len(test_datalist)}')
 
-elif augment == "augmented_enum" or augment == "augmented_canonical":
-    Graphs_list = torch.load(main_dir_path+'/data/Graphs_list_original'+'_'+tokenization+'.pt')
-    Graphs_list_combined = torch.load(main_dir_path+'/data/Graphs_list_'+augment+'_'+tokenization+'.pt')
-    org_polymers = Graphs_list_combined[:len(Graphs_list)]
-    augm_polymers = Graphs_list_combined[len(Graphs_list):] 
-    mon_combs=[]
-    # go through original data
-    for graph in org_polymers:
-        if augment=="augmented_canonical" or augment=="augmented_enum":
-            mon_combs.append(".".join(graph.monomer_smiles_nocan))
-        else: 
-            mon_combs.append(".".join(graph.monomer_smiles))
-
-    mon_combs= list(set(mon_combs))
-    mon_combs_shuffle = random.sample(mon_combs, len(mon_combs))
-    # take 80-20 split for trainig -  test data
-    train_mon_combs = mon_combs_shuffle[:int(0.8*len(mon_combs_shuffle))]
-    val_mon_combs = mon_combs_shuffle[int(0.8*len(mon_combs_shuffle)):int(0.9*len(mon_combs_shuffle))]
-    test_mon_combs = mon_combs_shuffle[int(0.9*len(mon_combs_shuffle)):]
-
-    train_datalist=[]
-    val_datalist=[]
-    test_datalist=[]
-    for graph in org_polymers: 
-        if ".".join(graph.monomer_smiles_nocan) in train_mon_combs:
-            train_datalist.append(graph)
-        elif ".".join(graph.monomer_smiles_nocan) in val_mon_combs:
-            val_datalist.append(graph)
-        elif ".".join(graph.monomer_smiles_nocan) in test_mon_combs:
-            test_datalist.append(graph)
-
-    # go through the augmented data 
-    mon_combs_new=[]
-    for graph in augm_polymers:
-        if not ".".join(graph.monomer_smiles_nocan) in mon_combs:
-            # only monomer combinations that have not been seen in the original dataset
-            mon_combs_new.append(".".join(graph.monomer_smiles_nocan))
-        # Check that the same monomer combinations are not in train and testset
-
-
-
-    mon_combs_augm= list(set(mon_combs_new))
-    mon_combs_augm_shuffle = random.sample(mon_combs_augm, len(mon_combs_augm))
-    train_mon_combs_augm = mon_combs_augm_shuffle[:int(0.95*len(mon_combs_augm_shuffle))]
-    test_mon_combs_augm = mon_combs_augm_shuffle[int(0.95*len(mon_combs_augm_shuffle)):]
-
-    for graph in augm_polymers: 
-        if ".".join(graph.monomer_smiles_nocan) in train_mon_combs_augm:
-            train_datalist.append(graph)
-        elif ".".join(graph.monomer_smiles_nocan) in test_mon_combs_augm:
-            test_datalist.append(graph)
-
-elif augment == "augmented":
+if augment == "augmented":
     Graphs_list = torch.load(main_dir_path+'/data/Graphs_list_original'+'_'+tokenization+'.pt')
     Graphs_list_combined = torch.load(main_dir_path+'/data/Graphs_list_'+augment+'_'+tokenization+'.pt')
     org_polymers = Graphs_list_combined[:len(Graphs_list)]
@@ -203,6 +142,8 @@ elif augment == "augmented":
     mon_combs= list(set(mon_combs))
     mon_combs_shuffle = random.sample(mon_combs, len(mon_combs))
     # take 80-20 split for trainig -  test data
+    # Split not the data randomly but monomer combinations randomly, so same monomer combinations are not in train and testset
+
     train_mon_combs = mon_combs_shuffle[:int(0.8*len(mon_combs_shuffle))]
     val_mon_combs = mon_combs_shuffle[int(0.8*len(mon_combs_shuffle)):int(0.9*len(mon_combs_shuffle))]
     test_mon_combs = mon_combs_shuffle[int(0.9*len(mon_combs_shuffle)):]
@@ -224,62 +165,6 @@ elif augment == "augmented":
         if not ".".join(graph.monomer_smiles) in mon_combs:
             # only monomer combinations that have not been seen in the original dataset
             mon_combs_new.append(".".join(graph.monomer_smiles))
-        # Check that the same monomer combinations are not in train and testset
-
-
-
-    mon_combs_augm= list(set(mon_combs_new))
-    mon_combs_augm_shuffle = random.sample(mon_combs_augm, len(mon_combs_augm))
-    train_mon_combs_augm = mon_combs_augm_shuffle[:int(0.95*len(mon_combs_augm_shuffle))]
-    test_mon_combs_augm = mon_combs_augm_shuffle[int(0.95*len(mon_combs_augm_shuffle)):]
-
-    for graph in augm_polymers: 
-        if ".".join(graph.monomer_smiles) in train_mon_combs_augm:
-            train_datalist.append(graph)
-        elif ".".join(graph.monomer_smiles) in test_mon_combs_augm:
-            test_datalist.append(graph)
-
-    # print some statistics
-    print(f'Number of training graphs: {len(train_datalist)}')
-    print(f'Number of test graphs: {len(test_datalist)}')
-
-elif augment == "augmented_old":
-    Graphs_list = torch.load(main_dir_path+'/data/Graphs_list_original'+'_'+tokenization+'.pt')
-    Graphs_list_combined = torch.load(main_dir_path+'/data/Graphs_list_'+augment+'_'+tokenization+'.pt')
-    org_polymers = Graphs_list_combined[:len(Graphs_list)]
-    augm_polymers = Graphs_list_combined[len(Graphs_list):] 
-    mon_combs=[]
-    # go through original data
-    for graph in org_polymers:
-        mon_combs.append(".".join(graph.monomer_smiles))
-
-    mon_combs= list(set(mon_combs))
-    mon_combs_shuffle = random.sample(mon_combs, len(mon_combs))
-    # take 80-20 split for trainig -  test data
-    train_mon_combs = mon_combs_shuffle[:int(0.8*len(mon_combs_shuffle))]
-    val_mon_combs = mon_combs_shuffle[int(0.8*len(mon_combs_shuffle)):int(0.9*len(mon_combs_shuffle))]
-    test_mon_combs = mon_combs_shuffle[int(0.9*len(mon_combs_shuffle)):]
-
-    train_datalist=[]
-    val_datalist=[]
-    test_datalist=[]
-    for graph in org_polymers: 
-        if ".".join(graph.monomer_smiles) in train_mon_combs:
-            train_datalist.append(graph)
-        elif ".".join(graph.monomer_smiles) in val_mon_combs:
-            val_datalist.append(graph)
-        elif ".".join(graph.monomer_smiles) in test_mon_combs:
-            test_datalist.append(graph)
-
-    # go through the augmented data 
-    mon_combs_new=[]
-    for graph in augm_polymers:
-        if not ".".join(graph.monomer_smiles) in mon_combs:
-            # only monomer combinations that have not been seen in the original dataset
-            mon_combs_new.append(".".join(graph.monomer_smiles))
-        # Check that the same monomer combinations are not in train and testset
-
-
 
     mon_combs_augm= list(set(mon_combs_new))
     mon_combs_augm_shuffle = random.sample(mon_combs_augm, len(mon_combs_augm))
@@ -327,107 +212,13 @@ for step, data in enumerate(train_loader):
 # %% Create Matrices needed for Message Passing
 
 
-def MP_Matrix_Creator(loader):
-    '''
-    Here we create the two matrices needed later for the message passinng part of the graph neural network. 
-    They are in essence different forms of the adjacency matrix of the graph. They are created on a batch thus the batches cannot be shuffled
-    The graph and both matrices are saved per batch in a dictionary
-    '''
-    dict_graphs_w_matrix = {}
-    for batch, graph in enumerate(loader):
-        # get attributes of graphs in batch
-        nodes = graph.x
-        edge_index = graph.edge_index
-        edge_attr = graph.edge_attr
-        atom_weights = graph.W_atoms
-        bond_weights = graph.W_bonds
-        num_bonds = edge_index[0].shape[0]
-
-        '''
-        Create edge update message passing matrix
-        '''
-        dest_is_origin_matrix = torch.zeros(
-            size=(num_bonds, num_bonds)).to(device)
-        # for sparse matrix
-        I = torch.empty(2, 0, dtype=torch.long)
-        V = torch.empty(0)
-
-        for i in range(num_bonds):
-            # find edges that are going to the originating atom (neigbouring edges)
-            incoming_edges_idx = (
-                edge_index[1] == edge_index[0, i]).nonzero().flatten()
-            # check whether those edges originate from our bonds destination atom, if so ignore that bond
-            idx_from_dest_atom = (
-                edge_index[0, incoming_edges_idx] == edge_index[1, i])
-            incoming_edges_idx = incoming_edges_idx[idx_from_dest_atom != True]
-            # find the features and assoociated weights of those neigbouring edges
-            weights_inc_edges = bond_weights[incoming_edges_idx]
-            # create matrix
-            dest_is_origin_matrix[i, incoming_edges_idx] = weights_inc_edges
-
-            # For Sparse Version
-            edge = torch.tensor([i])
-            # create indices
-            i1 = edge.repeat_interleave(len(incoming_edges_idx))
-            i2 = incoming_edges_idx.clone()
-            i = torch.stack((i1, i2), dim=0)
-            # find assocociated values
-            v = weights_inc_edges
-
-            # append to larger arrays
-            I = torch.cat((I, i), dim=1)
-            V = torch.cat((V, v))
-
-        # create a COO sparse version of edge message passing matrix
-        dest_is_origin_sparse = torch.sparse_coo_tensor(
-            I, V, [num_bonds, num_bonds])
-        '''
-        Create node update message passing matrix
-        '''
-        inc_edges_to_atom_matrix = torch.zeros(
-            size=(nodes.shape[0], edge_index.shape[1])).to(device)
-
-        I = torch.empty(2, 0, dtype=torch.long)
-        V = torch.empty(0)
-        for i in range(nodes.shape[0]):
-            # find index of edges that are incoming to specific atom
-            inc_edges_idx = (edge_index[1] == i).nonzero().flatten()
-            weights_inc_edges = bond_weights[inc_edges_idx]
-            inc_edges_to_atom_matrix[i, inc_edges_idx] = weights_inc_edges
-
-            # for sparse version
-            node = torch.tensor([i])
-            i1 = node.repeat_interleave(len(inc_edges_idx))
-            i2 = inc_edges_idx.clone()
-            i = torch.stack((i1, i2), dim=0)
-            v = weights_inc_edges
-
-            I = torch.cat((I, i), dim=1)
-            V = torch.cat((V, v))
-
-        # create a COO sparse version of node message passing matrix
-        inc_edges_to_atom_sparse = torch.sparse_coo_tensor(
-            I, V, [nodes.shape[0], edge_index.shape[1]])
-
-        if batch % 10 == 0:
-            print(f"[{batch} / {len(loader)}]")
-
-        '''
-        Store in Dictionary
-        '''
-        dict_graphs_w_matrix[str(batch)] = [
-            graph, dest_is_origin_sparse, inc_edges_to_atom_sparse]
-
-    return dict_graphs_w_matrix
-
-
 # %% Create dictionary with bathed graphs and message passing matrices for supervised train set
 
-dict_train_loader = MP_Matrix_Creator(train_loader)
+dict_train_loader = MP_Matrix_Creator(train_loader, device)
 torch.save(dict_train_loader, main_dir_path+'/data/dict_train_loader_'+augment+'_'+tokenization+'.pt')
-dict_val_loader = MP_Matrix_Creator(val_loader)
+dict_val_loader = MP_Matrix_Creator(val_loader, device)
 torch.save(dict_val_loader, main_dir_path+'/data/dict_val_loader_'+augment+'_'+tokenization+'.pt')
-dict_test_loader = MP_Matrix_Creator(test_loader)
+dict_test_loader = MP_Matrix_Creator(test_loader, device)
 torch.save(dict_test_loader, main_dir_path+'/data/dict_test_loader_'+augment+'_'+tokenization+'.pt')
 
 

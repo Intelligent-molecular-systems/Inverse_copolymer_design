@@ -8,10 +8,6 @@ sys.path.append(main_dir_path)
 
 from data_processing.Smiles_enum_canon import SmilesEnumCanon
 
-
-
-
-
 df = pd.read_csv(main_dir_path+'/data/dataset-combined-poly_chemprop.csv')
 
 all_poly_inputs = []

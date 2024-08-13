@@ -148,14 +148,14 @@ if device.type == 'cuda':
     print('Cached:   ', round(torch.cuda.memory_reserved(0)/1024**3, 1), 'GB')
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--augment", help="options: augmented, original, augmented_canonical", default="augmented", choices=["augmented", "original", "augmented_canonical", "augmented_enum", "augmented_old"])
+parser.add_argument("--augment", help="options: augmented, original", default="augmented", choices=["augmented", "original"])
 parser.add_argument("--tokenization", help="options: oldtok, RT_tokenized", default="oldtok", choices=["oldtok", "RT_tokenized"])
 parser.add_argument("--embedding_dim", help="latent dimension (equals word embedding dimension in this model)", default=32)
 parser.add_argument("--beta", default=1, help="option: <any number>, schedule", choices=["normalVAE","schedule"])
 parser.add_argument("--loss", default="ce", choices=["ce","wce"])
 parser.add_argument("--AE_Warmup", default=False, action='store_true')
 parser.add_argument("--seed", type=int, default=42)
-parser.add_argument("--initialization", default="random", choices=["random", "xavier", "kaiming"])
+parser.add_argument("--initialization", default="random", choices=["random"])
 parser.add_argument("--add_latent", type=int, default=1)
 parser.add_argument("--ppguided", type=int, default=0)
 parser.add_argument("--dec_layers", type=int, default=4)
@@ -240,9 +240,8 @@ model = model_type(num_node_features,num_edge_features,hidden_dimension,embeddin
 model.to(device)
 
 print(model)
-print('Randomly initialized weights')
 
-n_iter = int(20 * num_train_graphs/batch_size)# 20 epochs
+n_iter = int(20 * num_train_graphs/batch_size) # 20 epochs
 # Beta scheduling function from Optimus paper 
 def frange_cycle_zero_linear(n_iter, start=0.0, stop=model_config['max_beta'],  n_cycle=5, ratio_increase=0.5, ratio_zero=0.3): #, beginning_zero=0.1):
     L = np.ones(n_iter) * stop

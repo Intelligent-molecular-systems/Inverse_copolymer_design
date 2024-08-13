@@ -549,7 +549,6 @@ class G2S_VAE(nn.Module):
     
 
     def inference(self, data, device, dest_is_origin_matrix=None, inc_edges_to_atom_matrix=None, sample=False, log_var=None):
-        #TODO: Function arguments (test batch?, single graph?, latent representation?), right encoder call
         if isinstance(data, torch.Tensor): # tensor with latent representations
             if data.size(-1) != self.embedding_dim: #tensor input needs to be embedding/hidden size
                 raise Exception('Size of input is {}, must be {}'.format(data.size(0), self.embedding_dim))

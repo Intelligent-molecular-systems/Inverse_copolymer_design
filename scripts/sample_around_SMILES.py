@@ -16,100 +16,6 @@ import random
 import numpy as np
 
 
-def MP_Matrix_Creator(loader):
-    '''
-    Here we create the two matrices needed later for the message passinng part of the graph neural network. 
-    They are in essence different forms of the adjacency matrix of the graph. They are created on a batch thus the batches cannot be shuffled
-    The graph and both matrices are saved per batch in a dictionary
-    '''
-    dict_graphs_w_matrix = {}
-    for batch, graph in enumerate(loader):
-        # get attributes of graphs in batch
-        nodes = graph.x
-        edge_index = graph.edge_index
-        edge_attr = graph.edge_attr
-        atom_weights = graph.W_atoms
-        bond_weights = graph.W_bonds
-        num_bonds = edge_index[0].shape[0]
-
-        '''
-        Create edge update message passing matrix
-        '''
-        dest_is_origin_matrix = torch.zeros(
-            size=(num_bonds, num_bonds)).to(device)
-        # for sparse matrix
-        I = torch.empty(2, 0, dtype=torch.long).to(device)
-        V = torch.empty(0).to(device)
-
-        for i in range(num_bonds):
-            # find edges that are going to the originating atom (neigbouring edges)
-            incoming_edges_idx = (
-                edge_index[1] == edge_index[0, i]).nonzero().flatten()
-            # check whether those edges originate from our bonds destination atom, if so ignore that bond
-            idx_from_dest_atom = (
-                edge_index[0, incoming_edges_idx] == edge_index[1, i])
-            incoming_edges_idx = incoming_edges_idx[idx_from_dest_atom != True]
-            # find the features and assoociated weights of those neigbouring edges
-            weights_inc_edges = bond_weights[incoming_edges_idx]
-            # create matrix
-            dest_is_origin_matrix[i, incoming_edges_idx] = weights_inc_edges
-
-            # For Sparse Version
-            edge = torch.tensor([i])
-            # create indices
-            i1 = edge.repeat_interleave(len(incoming_edges_idx)).to(device)
-            i2 = incoming_edges_idx.clone().to(device)
-            i = torch.stack((i1, i2), dim=0)
-            # find assocociated values
-            v = weights_inc_edges
-
-            # append to larger arrays
-            I = torch.cat((I, i), dim=1)
-            V = torch.cat((V, v))
-
-        # create a COO sparse version of edge message passing matrix
-        dest_is_origin_sparse = torch.sparse_coo_tensor(
-            I, V, [num_bonds, num_bonds])
-        '''
-        Create node update message passing matrix
-        '''
-        inc_edges_to_atom_matrix = torch.zeros(
-            size=(nodes.shape[0], edge_index.shape[1])).to(device)
-
-        I = torch.empty(2, 0, dtype=torch.long).to(device)
-        V = torch.empty(0).to(device)
-        for i in range(nodes.shape[0]):
-            # find index of edges that are incoming to specific atom
-            inc_edges_idx = (edge_index[1] == i).nonzero().flatten()
-            weights_inc_edges = bond_weights[inc_edges_idx]
-            inc_edges_to_atom_matrix[i, inc_edges_idx] = weights_inc_edges
-
-            # for sparse version
-            node = torch.tensor([i]).to(device)
-            i1 = node.repeat_interleave(len(inc_edges_idx))
-            i2 = inc_edges_idx.clone()
-            i = torch.stack((i1, i2), dim=0)
-            v = weights_inc_edges
-
-            I = torch.cat((I, i), dim=1).to(device)
-            V = torch.cat((V, v)).to(device)
-
-        # create a COO sparse version of node message passing matrix
-        inc_edges_to_atom_sparse = torch.sparse_coo_tensor(
-            I, V, [nodes.shape[0], edge_index.shape[1]])
-
-        if batch % 10 == 0:
-            print(f"[{batch} / {len(loader)}]")
-
-        '''
-        Store in Dictionary
-        '''
-        dict_graphs_w_matrix[str(batch)] = [
-            graph, dest_is_origin_sparse, inc_edges_to_atom_sparse]
-
-    return dict_graphs_w_matrix
-
-
 all_predictions = []
 
 # setting device on GPU if available, else CPU
@@ -125,18 +31,18 @@ if device.type == 'cuda':
     print('Cached:   ', round(torch.cuda.memory_reserved(0)/1024**3, 1), 'GB')
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--augment", help="options: augmented, original, augmented_canonical", default="original", choices=["augmented", "augmented_old", "original", "augmented_canonical", "augmented_enum"])
+parser.add_argument("--augment", help="options: augmented, original", default="augmented", choices=["augmented", "original"])
 parser.add_argument("--tokenization", help="options: oldtok, RT_tokenized", default="oldtok", choices=["oldtok", "RT_tokenized"])
 parser.add_argument("--embedding_dim", help="latent dimension (equals word embedding dimension in this model)", default=32)
 parser.add_argument("--beta", default=1, help="option: <any number>, schedule", choices=["normalVAE","schedule"])
 parser.add_argument("--loss", default="ce", choices=["ce","wce"])
 parser.add_argument("--AE_Warmup", default=False, action='store_true')
 parser.add_argument("--seed", type=int, default=42)
-parser.add_argument("--initialization", default="random", choices=["random", "xavier", "kaiming"])
+parser.add_argument("--initialization", default="random", choices=["random"])
 parser.add_argument("--add_latent", type=int, default=1)
 parser.add_argument("--ppguided", type=int, default=0)
 parser.add_argument("--dec_layers", type=int, default=4)
-parser.add_argument("--max_beta", type=float, default=0.01)
+parser.add_argument("--max_beta", type=float, default=0.1)
 parser.add_argument("--max_alpha", type=float, default=0.1)
 parser.add_argument("--epsilon", type=float, default=1)
 
@@ -203,7 +109,7 @@ if os.path.isfile(filepath):
     g.to(device)
     data_list.append(g)
     data_loader = DataLoader(dataset=data_list, batch_size=64, shuffle=False)
-    dict_data_loader1 = MP_Matrix_Creator(data_loader)
+    dict_data_loader1 = MP_Matrix_Creator(data_loader, device)
 
     data_list = []
     seed_smiles_2 = "[*:1]c1ccc2c(c1)C(=C(C#N)C#N)c1cc([*:2])ccc1-2.[*:3]c1cc([*:4])cc(C(C)C)c1N|0.75|0.25|<1-2:0.375:0.375<1-1:0.375:0.375<2-2:0.375:0.375<3-4:0.375:0.375<3-3:0.375:0.375<4-4:0.125:0.125<1-3:0.125:0.125<1-4:0.125:0.125<2-3:0.125:0.125<2-4:0.125:0.125"#"[*:1]c1ccc2c(c1)S(=O)(=O)c1cc([*:2])ccc1-2.[*:3]c1ccc2c3ccc([*:4])cc3c3ccccc3c2c1|0.5|0.5|<1-3:0.5:0.5<1-4:0.5:0.5<2-3:0.5:0.5<2-4:0.5:0.5" # Second best polymer from Bai et. al paper
@@ -215,7 +121,7 @@ if os.path.isfile(filepath):
     g.to(device)
     data_list.append(g)
     data_loader = DataLoader(dataset=data_list, batch_size=64, shuffle=False)
-    dict_data_loader2 = MP_Matrix_Creator(data_loader)
+    dict_data_loader2 = MP_Matrix_Creator(data_loader, device)
     dict_data_loaders = [dict_data_loader1,dict_data_loader2]
 
     seed_literature_zs = []
@@ -283,44 +189,6 @@ if os.path.isfile(filepath):
             np.save(f, seed_z)
         with open(dir_name+'generated_polymers_from_seed'+str(seednr)+'_literature_noise'+str(std)+'.pkl', 'wb') as f:
             pickle.dump(all_predictions_seed, f)
-
-
-    """ 
-    all_predictions_interp = []
-    with torch.no_grad():
-        model.eval()
-        
-        start_mol = seed_smiles
-        end_mol = seed_smiles_2
-        seed_z1 = seed_literature_zs[0]
-        seed_z2 = seed_literature_zs[1]
-        print(seed_z1, seed_z2)
-
-        # Number of steps for interpolation
-        num_steps = 10
-
-        # Calculate the step size for each dimension
-        step_sizes = (seed_z2 - seed_z1) / (num_steps + 1)  # Adding 1 to include the endpoints
-
-        # Generate interpolated vectors
-        interpolated_vectors = [seed_z1 + i * step_sizes for i in range(1, num_steps + 1)]
-
-        # Include the endpoints
-        interpolated_vectors = torch.stack([seed_z1]+ interpolated_vectors+ [seed_z2])
-
-        # Display the interpolated vectors
-        for s in range(interpolated_vectors.shape[0]):
-            prediction_interp, _, _, _, y = model.inference(data=interpolated_vectors[s], device=device, sample=False, log_var=None)
-            prediction_string = combine_tokens(tokenids_to_vocab(prediction_interp[0][0].tolist(), vocab), tokenization=tokenization)
-            all_predictions_interp.append(prediction_string)
-
-        with open(dir_name+'interpolation_between_two_random_polymers'+'.txt', 'w') as f:
-            f.write("Molecule1: %s \n" %start_mol)
-            f.write("Molecule2: %s \n" %end_mol)
-            f.write("The following are the stepwise interpolated molecules\n")
-            for s in all_predictions_interp:
-                f.write(f"{s}\n")
-    """
 
 
 else: print("The model training diverged and there are is no trained model file!")

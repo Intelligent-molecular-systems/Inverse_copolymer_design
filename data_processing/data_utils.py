@@ -3,6 +3,7 @@ import logging
 from typing import Any, Dict, List, Tuple
 import os
 import numpy as np
+import torch
 
 def tokenize_poly_input(poly_input: str): 
     # Smiles of monomers containing wildcards
@@ -171,3 +172,96 @@ def token_weights(vocab_file):
     class_weights = list(weights.values())
     return class_weights
 
+
+def MP_Matrix_Creator(loader, device):
+    '''
+    Here we create the two matrices needed later for the message passinng part of the graph neural network. 
+    They are in essence different forms of the adjacency matrix of the graph. They are created on a batch thus the batches cannot be shuffled
+    The graph and both matrices are saved per batch in a dictionary
+    '''
+    dict_graphs_w_matrix = {}
+    for batch, graph in enumerate(loader):
+        # get attributes of graphs in batch
+        nodes = graph.x
+        edge_index = graph.edge_index
+        edge_attr = graph.edge_attr
+        atom_weights = graph.W_atoms
+        bond_weights = graph.W_bonds
+        num_bonds = edge_index[0].shape[0]
+
+        '''
+        Create edge update message passing matrix
+        '''
+        dest_is_origin_matrix = torch.zeros(
+            size=(num_bonds, num_bonds)).to(device)
+        # for sparse matrix
+        I = torch.empty(2, 0, dtype=torch.long).to(device)
+        V = torch.empty(0).to(device)
+
+        for i in range(num_bonds):
+            # find edges that are going to the originating atom (neigbouring edges)
+            incoming_edges_idx = (
+                edge_index[1] == edge_index[0, i]).nonzero().flatten()
+            # check whether those edges originate from our bonds destination atom, if so ignore that bond
+            idx_from_dest_atom = (
+                edge_index[0, incoming_edges_idx] == edge_index[1, i])
+            incoming_edges_idx = incoming_edges_idx[idx_from_dest_atom != True]
+            # find the features and assoociated weights of those neigbouring edges
+            weights_inc_edges = bond_weights[incoming_edges_idx]
+            # create matrix
+            dest_is_origin_matrix[i, incoming_edges_idx] = weights_inc_edges
+
+            # For Sparse Version
+            edge = torch.tensor([i])
+            # create indices
+            i1 = edge.repeat_interleave(len(incoming_edges_idx)).to(device)
+            i2 = incoming_edges_idx.clone().to(device)
+            i = torch.stack((i1, i2), dim=0)
+            # find assocociated values
+            v = weights_inc_edges
+
+            # append to larger arrays
+            I = torch.cat((I, i), dim=1)
+            V = torch.cat((V, v))
+
+        # create a COO sparse version of edge message passing matrix
+        dest_is_origin_sparse = torch.sparse_coo_tensor(
+            I, V, [num_bonds, num_bonds])
+        '''
+        Create node update message passing matrix
+        '''
+        inc_edges_to_atom_matrix = torch.zeros(
+            size=(nodes.shape[0], edge_index.shape[1])).to(device)
+
+        I = torch.empty(2, 0, dtype=torch.long).to(device)
+        V = torch.empty(0).to(device)
+        for i in range(nodes.shape[0]):
+            # find index of edges that are incoming to specific atom
+            inc_edges_idx = (edge_index[1] == i).nonzero().flatten()
+            weights_inc_edges = bond_weights[inc_edges_idx]
+            inc_edges_to_atom_matrix[i, inc_edges_idx] = weights_inc_edges
+
+            # for sparse version
+            node = torch.tensor([i]).to(device)
+            i1 = node.repeat_interleave(len(inc_edges_idx))
+            i2 = inc_edges_idx.clone()
+            i = torch.stack((i1, i2), dim=0)
+            v = weights_inc_edges
+
+            I = torch.cat((I, i), dim=1).to(device)
+            V = torch.cat((V, v)).to(device)
+
+        # create a COO sparse version of node message passing matrix
+        inc_edges_to_atom_sparse = torch.sparse_coo_tensor(
+            I, V, [nodes.shape[0], edge_index.shape[1]])
+
+        if batch % 10 == 0:
+            print(f"[{batch} / {len(loader)}]")
+
+        '''
+        Store in Dictionary
+        '''
+        dict_graphs_w_matrix[str(batch)] = [
+            graph, dest_is_origin_sparse, inc_edges_to_atom_sparse]
+
+    return dict_graphs_w_matrix

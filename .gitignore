@@ -27,3 +27,4 @@ Cluster_env*
 wandb*
 *.sh
 *.txt
+*.sif

@@ -1,0 +1,23 @@
+Bootstrap: docker
+From: condaforge/miniforge3:latest
+
+%files
+    environment_apptainer.yml /environment_apptainer.yml
+
+%post
+    # Update and install necessary packages
+    apt-get update && \
+        DEBIAN_FRONTEND=noninteractive TZ=Europe/Amsterdam \
+        apt-get install -y tree time vim ncdu speedtest-cli build-essential
+
+    # Create a new Conda environment 
+    mamba env create --quiet --file /environment_apptainer.yml
+
+    # Clean up
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+    mamba clean --all -y
+
+    # Now add the script to activate the Conda environment
+    echo '. "/opt/conda/etc/profile.d/conda.sh"' >> $APPTAINER_ENVIRONMENT
+    echo 'conda activate __apptainer__' >> $APPTAINER_ENVIRONMENT
+ 

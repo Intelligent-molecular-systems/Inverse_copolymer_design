@@ -52,6 +52,7 @@ poly_strings = []
 import os
 import re
 scaling_factor=1.0
+# After running scripts/optimization_GA_correct, copy from model directory a file that contains the top20 mols from GA
 file_path = os.path.join(os.getcwd(), 'top20_mols_GA_correct_mimick_peak.txt')
 with open(file_path, 'r') as file:
     lines = file.readlines()

@@ -90,17 +90,22 @@ dependencies:
       - click==8.1.7
       - colorama==0.4.6
       - configargparse==1.7
+      - contourpy==1.2.1
       - ctranslate2==3.24.0
+      - cycler==0.12.1
       - fasttext-wheel==0.9.2
       - flask==3.0.3
+      - fonttools==4.53.1
       - grpcio==1.65.4
       - itsdangerous==2.2.0
       - jinja2==3.1.4
       - joblib==1.4.2
+      - kiwisolver==1.4.5
       - llvmlite==0.43.0
       - lxml==5.3.0
       - markdown==3.6
       - markupsafe==2.1.5
+      - matplotlib==3.7.1
       - networkx==2.8.4
       - numba==0.60.0
       - opennmt-py==3.1.3

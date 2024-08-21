@@ -120,7 +120,7 @@ if os.path.isfile(filepath):
     connectivity_pattern = []
     with torch.no_grad():
         for i, batch in enumerate(batches):
-            if (augment=='augmented' or augment=="augmented_old") and dataset_type=='train': # otherwise it takes to long for train dataset
+            if augment=='augmented' and dataset_type=='train': # otherwise it takes to long for train dataset
                 if i>=500: 
                     break
             data = dict_train_loader[str(batch)][0]
@@ -200,7 +200,7 @@ if os.path.isfile(filepath):
     connectivity_pattern = []
     with torch.no_grad():
         for i, batch in enumerate(batches):
-            if (augment=='augmented' or augment=="augmented_old") and dataset_type=='train': # otherwise it takes to long for train dataset
+            if augment=='augmented' and dataset_type=='train': # otherwise it takes to long for train dataset
                 if i>=500: 
                     break
             data = dict_train_loader[str(batch)][0]

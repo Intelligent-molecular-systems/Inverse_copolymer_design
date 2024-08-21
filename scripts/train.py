@@ -285,26 +285,26 @@ earlystopping = EarlyStopping(dir=directory_path, patience=es_patience)
 
 print(f'STARTING TRAINING')
 # Prepare dictionaries for training or load checkpoint
-#if os.path.isfile(os.path.join(directory_path,"model_best_loss.pt")):
-#    print("Loading model from checkpoint")
-#
-#    checkpoint = torch.load(os.path.join(directory_path,"model_best_loss.pt"))
-#    model.load_state_dict(checkpoint['model_state_dict'])
-#    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-#    epoch_cp = checkpoint['epoch']
-#    train_loss_dict = checkpoint['loss_dict']
-#    val_loss_dict = checkpoint['val_loss_dict']
-#    if model_config['beta'] == "schedule":
-#        global_step = checkpoint['global_step']
-#        monotonic_step = checkpoint['monotonic_step']
-#        model.beta =  model_config['max_beta']
+if os.path.isfile(os.path.join(directory_path,"model_best_loss.pt")):
+    print("Loading model from checkpoint")
+
+    checkpoint = torch.load(os.path.join(directory_path,"model_best_loss.pt"))
+    model.load_state_dict(checkpoint['model_state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    epoch_cp = checkpoint['epoch']
+    train_loss_dict = checkpoint['loss_dict']
+    val_loss_dict = checkpoint['val_loss_dict']
+    if model_config['beta'] == "schedule":
+        global_step = checkpoint['global_step']
+        monotonic_step = checkpoint['monotonic_step']
+        model.beta =  model_config['max_beta']
         #monotonic_step = 0
-#else: 
-train_loss_dict = {}
-val_loss_dict = {}
-epoch_cp = 0
-global_step = 0
-monotonic_step = 0
+else: 
+    train_loss_dict = {}
+    val_loss_dict = {}
+    epoch_cp = 0
+    global_step = 0
+    monotonic_step = 0
 
 
 

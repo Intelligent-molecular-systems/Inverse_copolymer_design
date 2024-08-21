@@ -100,7 +100,7 @@ if os.path.isfile(filepath):
     model.eval()
 
 class PropertyPrediction():
-    def __init__(self, model, nr_vars):
+    def __init__(self, model, nr_vars, objective_type):
         self.model_predictor = model
         self.weight_electron_affinity = 1  # Adjust the weight for electron affinity
         self.weight_ionization_potential = 1  # Adjust the weight for ionization potential
@@ -109,6 +109,7 @@ class PropertyPrediction():
         self.results_custom = {}
         self.nr_vars = nr_vars
         self.eval_calls = 0
+        self.objective_type = objective_type
 
     def evaluate(self, **params):
         # Assuming x is a 1D array containing the 32 numerical parameters
@@ -132,12 +133,18 @@ class PropertyPrediction():
         expanded_y_p = np.array([y_p_after_encoding_valid.pop(0) if val == 1 else [np.nan,np.nan] for val in list(validity)])
         expanded_z_p = np.array([z_p_after_encoding_valid.pop(0) if val == 1 else [0] * 32 for val in list(validity)])
         #print(x, expanded_z_p)
-        #dst = np.array([np.linalg.norm(a - b) for a,b in zip(x.cpu(), expanded_z_p)])
-        #print(dst)
-        # Use the encoded and predicted properties as evaluation for GA (more realistic property prediction)
-        #out["F"] = np.zeros((x.shape[0], 3)) # for three objectives (additionally minimze the distance of z vectors)
-        obj1 = self.weight_electron_affinity * expanded_y_p[~invalid_mask, 0]
-        obj2 = self.weight_ionization_potential * np.abs(expanded_y_p[~invalid_mask, 1] - 1)
+        if self.objective_type=='EAmin':
+            obj1 = self.weight_electron_affinity * expanded_y_p[~invalid_mask, 0]
+            obj2 = self.weight_ionization_potential * np.abs(expanded_y_p[~invalid_mask, 1] - 1)
+        if self.objective_type=='mimick_peak':
+            obj1 = self.weight_electron_affinity * np.abs(expanded_y_p[~invalid_mask, 0] + 2)
+            obj2 = self.weight_ionization_potential * np.abs(expanded_y_p[~invalid_mask, 1] - 1.2)
+        if self.objective_type=='mimick_best':
+            obj1 = self.weight_electron_affinity * np.abs(expanded_y_p[~invalid_mask, 0] + 2.64)
+            obj2 = self.weight_ionization_potential * np.abs(expanded_y_p[~invalid_mask, 1] - 1.61)
+        if self.objective_type=='max_gap':
+            obj1 = self.weight_electron_affinity * expanded_y_p[~invalid_mask, 0]
+            obj2 = - self.weight_ionization_potential * expanded_y_p[~invalid_mask, 1]
         #latent_inconsistency = np.linalg.norm(x.detach().numpy()-expanded_z_p)
         #print(latent_inconsistency)
 
@@ -271,7 +278,8 @@ elif cutoff==0:
 
 
 nr_vars = 32
-prop_predictor = PropertyPrediction(model, nr_vars)
+objective_type='mimick_peak' # options: max_gap, EAmin, mimick_peak, mimick_best
+prop_predictor = PropertyPrediction(model, nr_vars, objective_type)
 
 # Initialize BayesianOptimization
 optimizer = BayesianOptimization(f=prop_predictor.evaluate, pbounds=bounds)
@@ -285,9 +293,9 @@ optimizer.maximize(init_points=20, n_iter=500, acquisition_function=utility)
 results = optimizer.res
 results_custom = prop_predictor.results_custom
 
-with open(dir_name+'optimization_results_'+str(cutoff)+'.pkl', 'wb') as f:
+with open(dir_name+'optimization_results_'+str(cutoff)+'_'+str(objective_type)+'.pkl', 'wb') as f:
     pickle.dump(results, f)
-with open(dir_name+'optimization_results_custom_'+str(cutoff)+'.pkl', 'wb') as f:
+with open(dir_name+'optimization_results_custom_'+str(cutoff)+'_'+str(objective_type)+'.pkl', 'wb') as f:
     pickle.dump(results_custom, f)
 
 
@@ -299,12 +307,12 @@ best_objective = optimizer.max['target']
 print("Best Parameters:", best_params)
 print("Best Objective Value:", best_objective)
 
-with open(dir_name+'optimization_results_'+str(cutoff)+'.pkl', 'rb') as f:
+with open(dir_name+'optimization_results_'+str(cutoff)+'_'+str(objective_type)+'.pkl', 'rb') as f:
     results = pickle.load(f)
-with open(dir_name+'optimization_results_custom_'+str(cutoff)+'.pkl', 'rb') as f:
+with open(dir_name+'optimization_results_custom_'+str(cutoff)+'_'+str(objective_type)+'.pkl', 'rb') as f:
     results_custom = pickle.load(f)
 
-with open(dir_name+'optimization_results_custom_'+str(cutoff)+'.txt', 'w') as fl:
+with open(dir_name+'optimization_results_custom_'+str(cutoff)+'_'+str(objective_type)+'.txt', 'w') as fl:
      print(results_custom, file=fl)
 #print(results_custom)
 # Calculate distances between the BO and reencoded latents
@@ -446,7 +454,15 @@ def top_n_molecule_indices(objective_values, n_idx=10):
     return top_idxs
 
 # Extract data for the curves
-objective_values = [-(arr[0]+np.abs(arr[1]-1)) for arr in pred_RE]
+if objective_type=='mimick_peak':
+    objective_values = [-(np.abs(arr[0]+2)+np.abs(arr[1]-1.2)) for arr in pred_RE]
+elif objective_type=='mimick_best':
+    objective_values = [-((np.abs(arr[0]+2.64)+np.abs(arr[1]-1.61))) for arr in pred_RE]
+elif objective_type=='EAmin': 
+    objective_values = [-(arr[0]+np.abs(arr[1]-1)) for arr in pred_RE]
+elif objective_type =='max_gap':
+    objective_values = [-(arr[0]-arr[1]) for arr in pred_RE]
+
 indices_of_increases = indices_of_improvement(objective_values)
 
 EA_bo_imp = [EA_bo[i] for i in indices_of_increases]
@@ -457,16 +473,16 @@ best_z_re = [Latents_RE[i] for i in indices_of_increases]
 best_mols = {i+1: decoded_mols[i] for i in indices_of_increases}
 best_props = {i+1: [EA_re[i], EA_bo[i], IP_re[i], IP_bo[i]] for i in indices_of_increases}
 best_mols_rec = {i+1: rec_mols[i] for i in indices_of_increases}
-with open(dir_name+'best_mols_'+str(cutoff)+'.txt', 'w') as fl:
+with open(dir_name+'best_mols_'+str(cutoff)+'_'+str(objective_type)+'.txt', 'w') as fl:
     print(best_mols, file=fl)
     print(best_props, file=fl)
-with open(dir_name+'best_recon_mols_'+str(cutoff)+'.txt', 'w') as fl:
+with open(dir_name+'best_recon_mols_'+str(cutoff)+'_'+str(objective_type)+'.txt', 'w') as fl:
     print(best_mols_rec, file=fl)
 
 top_20_indices = top_n_molecule_indices(objective_values, n_idx=20)
 best_mols_t20 = {i+1: decoded_mols[i] for i in top_20_indices}
 best_props_t20 = {i+1: [EA_re[i], EA_bo[i], IP_re[i], IP_bo[i]] for i in top_20_indices}
-with open(dir_name+'top20_mols_'+str(cutoff)+'.txt', 'w') as fl:
+with open(dir_name+'top20_mols_'+str(cutoff)+'_'+str(objective_type)+'.txt', 'w') as fl:
     print(best_mols_t20, file=fl)
     print(best_props_t20, file=fl)
 
@@ -518,7 +534,7 @@ plt.xlabel('pc1')
 plt.ylabel('pc2')
 plt.title('Optimization in latent space')
 
-plt.savefig(dir_name+'BO_imp_projected_to_pca_'+str(cutoff)+'.png',  dpi=300)
+plt.savefig(dir_name+'BO_imp_projected_to_pca_'+str(cutoff)+'_'+str(objective_type)+'.png',  dpi=300)
 
 plt.figure(3)
 
@@ -546,7 +562,7 @@ plt.xlabel('pc1')
 plt.ylabel('pc2')
 plt.title('Optimization in latent space')
 
-plt.savefig(dir_name+'BO_imp_projected_to_pca_onlyred_'+str(cutoff)+'.png',  dpi=300)
+plt.savefig(dir_name+'BO_imp_projected_to_pca_onlyred_'+str(cutoff)+'_'+str(objective_type)+'.png',  dpi=300)
 
 
 
@@ -590,7 +606,7 @@ with torch.no_grad():
 
 print(f'Saving generated strings')
 i=0
-with open(dir_name+'results_around_BO_seed_'+str(cutoff)+'.txt', 'w') as f:
+with open(dir_name+'results_around_BO_seed_'+str(cutoff)+'_'+str(objective_type)+'.txt', 'w') as f:
     f.write("Seed string decoded: " + seed_string[0] + "\n")
     f.write("Prediction: "+ str(y_seed[0]))
     f.write("The results, sampling around the best population are the following\n")
@@ -782,7 +798,7 @@ classes_stoich = [['0.5','0.5'],['0.25','0.75'],['0.75','0.25']]
 classes_con = ['<1-3:0.25:0.25<1-4:0.25:0.25<2-3:0.25:0.25<2-4:0.25:0.25<1-2:0.25:0.25<3-4:0.25:0.25<1-1:0.25:0.25<2-2:0.25:0.25<3-3:0.25:0.25<4-4:0.25:0.25','<1-3:0.5:0.5<1-4:0.5:0.5<2-3:0.5:0.5<2-4:0.5:0.5','<1-2:0.375:0.375<1-1:0.375:0.375<2-2:0.375:0.375<3-4:0.375:0.375<3-3:0.375:0.375<4-4:0.375:0.375<1-3:0.125:0.125<1-4:0.125:0.125<2-3:0.125:0.125<2-4:0.125:0.125']
 whole_valid = len(monomer_smiles_predicted)
 validity = whole_valid/len(all_predictions)
-with open(dir_name+'novelty_BO_seed.txt', 'w') as f:
+with open(dir_name+'novelty_BO_seed_'+str(objective_type)+'.txt', 'w') as f:
     f.write("Gen Mon A validity: %.4f %% Gen Mon B validity: %.4f %% "% (100*validityA, 100*validityB,))
     f.write("Gen validity: %.4f %% "% (100*validity,))
     f.write("Novelty: %.4f %% "% (100*novelty,))

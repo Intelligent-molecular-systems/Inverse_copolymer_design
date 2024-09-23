@@ -19,8 +19,6 @@ venv/
 *.pkl
 *.sbatch
 Model_*/
-Polymer_project/
-Supervised_Only*
 pkg_download_dir/
 Checkpoints*
 Cluster_env*

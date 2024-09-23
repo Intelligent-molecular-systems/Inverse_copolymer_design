@@ -106,7 +106,7 @@ class Property_optimization_problem(Problem):
         super().__init__(n_var=len(x_min), n_obj=2, n_constr=0, xl=x_min, xu=x_max)
         self.model_predictor = model
         self.weight_electron_affinity = 1  # Adjust the weight for electron affinity
-        self.weight_ionization_potential = 5  # Adjust the weight for ionization potential
+        self.weight_ionization_potential = 1  # Adjust the weight for ionization potential
         self.weight_z_distances = 5  # Adjust the weight for distance between GA chosen z and reencoded z
         self.penalty_value = 100  # Adjust the weight for penalty of validity
         self.modified_solution = None # Initialize the class variable that later stores the recalculated latents
@@ -340,7 +340,7 @@ if not cutoff==0.0:
 
 # Initialize the problem
 # options: max_gap, EAmin, mimick_peak, mimick_best
-objective_type='EAmin'
+objective_type='mimick_peak'
 problem = Property_optimization_problem(model, min_values, max_values, objective_type)
 
 # Termination criterium
@@ -612,7 +612,7 @@ IP_re_imp = [IP_re[i] for i in indices_of_increases]
 best_z_re = [Latents_RE[i] for i in indices_of_increases]
 best_mols = {i+1: decoded_mols[i] for i in indices_of_increases}
 best_props = {i+1: [EA_re[i],IP_re[i]] for i in indices_of_increases}
-with open(dir_name+'best_mols_GA_correct_IP5_'+str(objective_type)+'.txt', 'w') as fl:
+with open(dir_name+'best_mols_GA_correct_'+str(objective_type)+'.txt', 'w') as fl:
     print(best_mols, file=fl)
     print(best_props, file=fl)
 
@@ -622,7 +622,7 @@ best_props_t20 = {i+1: [EA_re[i], IP_re[i]] for i in top_20_indices}
 best_props_t20_c = {i+1: [EA_re_c[i], IP_re_c[i]] for i in top_20_indices}
 best_objs_t20 = {i+1: objective_values[i] for i in top_20_indices}
 best_objs_t20_c = {i+1: objective_values_c[i] for i in top_20_indices}
-with open(dir_name+'top20_mols_GA_correct_IP5_'+str(objective_type)+'.txt', 'w') as fl:
+with open(dir_name+'top20_mols_GA_correct_'+str(objective_type)+'.txt', 'w') as fl:
     print(best_mols_t20, file=fl)
     print(best_props_t20, file=fl)
     print(best_props_t20_c, file=fl)

@@ -94,14 +94,10 @@ print(f'Validity check and metrics for newly generated samples')
 with open(dir_name+'generated_polymers.pkl', 'rb') as f:
     all_predictions=pickle.load(f)
 
-if augment=="augmented":
-    df = pd.read_csv(main_dir_path+'/data/dataset-combined-poly_chemprop_v2.csv')
-if augment=="augmented_old":
+if augment == "original":
+    df = pd.read_csv(main_dir_path+'/data/dataset-poly_chemprop.csv')
+elif augment == "augmented":
     df = pd.read_csv(main_dir_path+'/data/dataset-combined-poly_chemprop.csv')
-elif augment=="augmented_canonical":
-    df = pd.read_csv(main_dir_path+'/data/dataset-combined-canonical-poly_chemprop.csv')
-elif augment=="augmented_enum":
-    df = pd.read_csv(main_dir_path+'/data/dataset-combined-enumerated2_poly_chemprop.csv')
 all_polymers_data= []
 all_train_polymers = []
 
@@ -189,6 +185,17 @@ for monB in monB_pred:
     if not monB in unique_mons:
         novelB+=1
 novelty_B = novelB/len(monB_pred)
+novelboth = 0
+novelone = 0
+for monA, monB in zip(monA_pred,monB_pred):
+    if (not monB in unique_mons) and (not monA in unique_mons):
+        novelboth+=1
+    if (not monB in unique_mons) or (not monA in unique_mons):
+        novelone+=1
+
+novelty_oneMon = novelone/len(monB_pred)
+novelty_both= novelboth/len(monB_pred)
+
 
 diversity = len(list(set(all_predictions)))/len(all_predictions)
 diversity_novel = len(list(set(novel_pols)))/len(novel_pols)
@@ -204,6 +211,8 @@ with open(dir_name+'generated_polymers.txt', 'w') as f:
     f.write("Gen Mon A validity: %.4f %% Gen Mon B validity: %.4f %% "% (100*validityA, 100*validityB,))
     f.write("Gen validity: %.4f %% "% (100*validity,))
     f.write("Novelty: %.4f %% "% (100*novelty,))
+    f.write("Novelty one Mon (at least): %.4f %% "% (100*novelty_oneMon,))
+    f.write("Novelty both Mons %.4f %% "% (100*novelty_both,))
     f.write("Novelty MonA full dataset: %.4f %% "% (100*novelty_A,))
     f.write("Novelty MonB full dataset: %.4f %% "% (100*novelty_B,))
     f.write("Novelty in full dataset: %.4f %% "% (100*novelty_full_dataset,))

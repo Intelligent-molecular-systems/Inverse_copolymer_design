@@ -23,8 +23,8 @@ Synthetic polymer discovery is a challenging task due to the vast design space a
 To get started, clone the repository and install the required dependencies.
 
 ```bash
-git clone https://github.com/GaVogel/G2SVAE
-cd G2SVAE
+git clone https://github.com/Intelligent-molecular-systems/Inverse_copolymer_design.git
+cd Inverse_copolymer_design
 conda env create -f environment.yml
 conda activate G2S_VAE_env
 ```

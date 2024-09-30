@@ -2,7 +2,7 @@
 
 **Repository for the paper "Inverse design of copolymers including stoichiometry and chain architecture" [link to paper]**
 
-This project aims to enable the machine learning-guided discovery of novel copolymers by generating monomer ensembles with different stoichiometries and chain architectures. Our model is based on a novel Variational Autoencoder (VAE) that encodes a graph and decodes a string, offering advanced polymer design capabilities, including inverse design and optimization in latent space.
+This project aims to enable the machine learning-guided discovery of novel copolymers by generating monomer ensembles with different stoichiometries and chain architectures. Our model is based on a novel Variational Autoencoder (VAE) that encodes a graph and decodes a string, offering advanced polymer design capabilities, including inverse design via optimization in latent space.
 
 ## Table of Contents
 - [Overview](#overview)
@@ -10,12 +10,6 @@ This project aims to enable the machine learning-guided discovery of novel copol
 - [System Requirements](#system-requirements)
 - [Project Structure](#project-structure)
 - [Usage](#usage)
-  - [Creating Dataloaders](#creating-dataloaders)
-  - [Training the Model](#training-the-model)
-  - [Evaluation](#evaluation)
-  - [Optimization in Latent Space](#optimization-in-latent-space)
-  - [Plotting Results](#plotting-results)
-- [Results](#results)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -23,7 +17,7 @@ This project aims to enable the machine learning-guided discovery of novel copol
 Synthetic polymer discovery is a challenging task due to the vast design space and the hierarchical complexity of polymer structures. This project advances machine learning methods by using a semi-supervised VAE for copolymer generation. Key contributions include:
 - Generation of monomer ensembles with stoichiometry and chain architecture.
 - A novel VAE architecture capable of encoding a graph and decoding a string.
-- Optimization of copolymers in latent space for specific electronic properties like electron affinity and ionization potential, demonstrated for photocatalysts in hydrogen production.
+- Optimization of copolymers in latent space for specific electronic properties (electron affinity and ionization potential), demonstrated for photocatalysts in hydrogen production.
 
 ## Installation
 To get started, clone the repository and install the required dependencies.
@@ -43,8 +37,9 @@ Alternatively, install the packages manually:
 - umap-learn==0.5.3
 - pandas==2.0.1
 - matplotlib==3.7.1
-- bayesian-optimization=1.4.3
-- pymoo=0.6.1.1
+- bayesian-optimization==1.4.3
+- pymoo==0.6.1.1
+- scikit-learn==1.5.1
 
 ## System Requirements
 The code was tested on windows and linux with Python 3.10.11 and a cuda-enabled GPU.

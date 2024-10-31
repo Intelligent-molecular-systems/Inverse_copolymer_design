@@ -293,8 +293,13 @@ optimizer = BayesianOptimization(f=prop_predictor.evaluate, pbounds=bounds)
 utility = UtilityFunction(kind="ucb")
 
 # Define the time limit in seconds
-stopping_criterion = "time" # time or iter
+stopping_type = "time" # time or iter
 max_time = 600  # Set to 600 seconds, for example
+max_iter = 500 # Set to a maximum number of iterations 
+if stopping_type == "time":
+    stopping_criterion = stopping_type+"_"+str(max_time)
+elif stopping_type == "iter":
+    stopping_criterion = stopping_type+"_"+str(max_iter)
 
 # Run the optimizer with the callback
 # Custom modification of the maximize function: If the max_time argument is specified, the 

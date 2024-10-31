@@ -1,6 +1,11 @@
+import sys, os
+main_dir_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.append(main_dir_path)
+
 import numpy as np
-from bayes_opt import BayesianOptimization
+from optimization_custom.bayesian_optimization import BayesianOptimization
 from bayes_opt.util import UtilityFunction
+from bayes_opt.event import DEFAULT_EVENTS, Events
 
 import argparse
 import torch
@@ -11,10 +16,6 @@ import json
 import pandas as pd
 import math
 
-import sys, os
-main_dir_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-sys.path.append(main_dir_path)
-
 from data_processing.data_utils import *
 from data_processing.rdkit_poly import *
 from data_processing.Smiles_enum_canon import SmilesEnumCanon
@@ -24,6 +25,7 @@ from data_processing.data_utils import *
 from data_processing.Function_Featurization_Own import poly_smiles_to_graph
 from data_processing.rdkit_poly import make_polymer_mol
 
+import time
 
 # setting device on GPU if available, else CPU
 # setting device on GPU if available, else CPU
@@ -41,19 +43,19 @@ if device.type == 'cuda':
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--augment", help="options: augmented, original", default="augmented", choices=["augmented", "original"])
-parser.add_argument("--tokenization", help="options: oldtok, RT_tokenized", default="oldtok", choices=["oldtok", "RT_tokenized"])
+parser.add_argument("--tokenization", help="options: oldtok, RT_tokenized", default="RT_tokenized", choices=["oldtok", "RT_tokenized"])
 parser.add_argument("--embedding_dim", help="latent dimension (equals word embedding dimension in this model)", default=32)
-parser.add_argument("--beta", default=1, help="option: <any number>, schedule", choices=["normalVAE","schedule"])
-parser.add_argument("--loss", default="ce", choices=["ce","wce"])
+parser.add_argument("--beta", default="schedule", help="option: <any number>, schedule", choices=["normalVAE","schedule"])
+parser.add_argument("--loss", default="wce", choices=["ce","wce"])
 parser.add_argument("--AE_Warmup", default=False, action='store_true')
-parser.add_argument("--seed", type=int, default=42)
+parser.add_argument("--seed", type=int, default=1)
 parser.add_argument("--initialization", default="random", choices=["random"])
 parser.add_argument("--add_latent", type=int, default=1)
-parser.add_argument("--ppguided", type=int, default=0)
+parser.add_argument("--ppguided", type=int, default=1)
 parser.add_argument("--dec_layers", type=int, default=4)
-parser.add_argument("--max_beta", type=float, default=0.1)
-parser.add_argument("--max_alpha", type=float, default=0.1)
-parser.add_argument("--epsilon", type=float, default=1)
+parser.add_argument("--max_beta", type=float, default=0.0004)
+parser.add_argument("--max_alpha", type=float, default=0.2)
+parser.add_argument("--epsilon", type=float, default=1.0)
 
 
 args = parser.parse_args()
@@ -204,6 +206,7 @@ class PropertyPrediction():
         # create data that can be encoded again
         prediction_strings = [combine_tokens(tokenids_to_vocab(predictions[sample][0].tolist(), vocab), tokenization=tokenization) for sample in range(len(predictions))]
         data_list = []
+        print(prediction_strings)
         for i, s in enumerate(prediction_strings):
             poly_input = s[:-1] # Last element is the _ char
             poly_input_nocan=None
@@ -278,7 +281,7 @@ elif cutoff==0:
 
 
 nr_vars = 32
-objective_type='mimick_peak' # options: max_gap, EAmin, mimick_peak, mimick_best
+objective_type='EAmin' # options: max_gap, EAmin, mimick_peak, mimick_best
 prop_predictor = PropertyPrediction(model, nr_vars, objective_type)
 
 # Initialize BayesianOptimization
@@ -289,13 +292,21 @@ optimizer = BayesianOptimization(f=prop_predictor.evaluate, pbounds=bounds)
 #utility = UtilityFunction(kind="ei", kappa=2.5, xi=0.01)
 utility = UtilityFunction(kind="ucb")
 
-optimizer.maximize(init_points=20, n_iter=500, acquisition_function=utility)
+# Define the time limit in seconds
+stopping_criterion = "time" # time or iter
+max_time = 600  # Set to 600 seconds, for example
+
+# Run the optimizer with the callback
+# Custom modification of the maximize function: If the max_time argument is specified, the 
+optimizer.maximize(init_points=5, n_iter=100, acquisition_function=utility, max_time=max_time)
+
+#optimizer.maximize(init_points=20, n_iter=500, acquisition_function=utility)
 results = optimizer.res
 results_custom = prop_predictor.results_custom
 
-with open(dir_name+'optimization_results_'+str(cutoff)+'_'+str(objective_type)+'.pkl', 'wb') as f:
+with open(dir_name+'optimization_results_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'.pkl', 'wb') as f:
     pickle.dump(results, f)
-with open(dir_name+'optimization_results_custom_'+str(cutoff)+'_'+str(objective_type)+'.pkl', 'wb') as f:
+with open(dir_name+'optimization_results_custom_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'.pkl', 'wb') as f:
     pickle.dump(results_custom, f)
 
 
@@ -307,12 +318,12 @@ best_objective = optimizer.max['target']
 print("Best Parameters:", best_params)
 print("Best Objective Value:", best_objective)
 
-with open(dir_name+'optimization_results_'+str(cutoff)+'_'+str(objective_type)+'.pkl', 'rb') as f:
+with open(dir_name+'optimization_results_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'.pkl', 'rb') as f:
     results = pickle.load(f)
-with open(dir_name+'optimization_results_custom_'+str(cutoff)+'_'+str(objective_type)+'.pkl', 'rb') as f:
+with open(dir_name+'optimization_results_custom_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'.pkl', 'rb') as f:
     results_custom = pickle.load(f)
 
-with open(dir_name+'optimization_results_custom_'+str(cutoff)+'_'+str(objective_type)+'.txt', 'w') as fl:
+with open(dir_name+'optimization_results_custom_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'.txt', 'w') as fl:
      print(results_custom, file=fl)
 #print(results_custom)
 # Calculate distances between the BO and reencoded latents
@@ -384,7 +395,7 @@ plt.plot(iterations, IP_re, label='IP (RE)')
 plt.xlabel('Index')
 plt.ylabel('Value')
 plt.legend()
-plt.savefig(dir_name+'BO_objectives_'+str(cutoff)+'.png',  dpi=300)
+plt.savefig(dir_name+'BO_objectives_'+str(cutoff)+'_'+str(stopping_criterion)+'.png',  dpi=300)
 plt.close()
 
 
@@ -419,7 +430,7 @@ clb = plt.colorbar()
 clb.ax.set_title('Electron affinity')
 plt.scatter(z_embedded_BO[:, 0], z_embedded_BO[:, 1], s=2, c='black')
 plt.scatter(z_embedded_RE[:, 0], z_embedded_RE[:, 1], s=2, c='red')
-plt.savefig(dir_name+'BO_projected_to_pca_'+str(cutoff)+'.png',  dpi=300)
+plt.savefig(dir_name+'BO_projected_to_pca_'+str(cutoff)+'_'+str(stopping_criterion)+'.png',  dpi=300)
 plt.close()
 #pca = PCA(n_components=2)
 
@@ -473,16 +484,16 @@ best_z_re = [Latents_RE[i] for i in indices_of_increases]
 best_mols = {i+1: decoded_mols[i] for i in indices_of_increases}
 best_props = {i+1: [EA_re[i], EA_bo[i], IP_re[i], IP_bo[i]] for i in indices_of_increases}
 best_mols_rec = {i+1: rec_mols[i] for i in indices_of_increases}
-with open(dir_name+'best_mols_'+str(cutoff)+'_'+str(objective_type)+'.txt', 'w') as fl:
+with open(dir_name+'best_mols_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'.txt', 'w') as fl:
     print(best_mols, file=fl)
     print(best_props, file=fl)
-with open(dir_name+'best_recon_mols_'+str(cutoff)+'_'+str(objective_type)+'.txt', 'w') as fl:
+with open(dir_name+'best_recon_mols_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'.txt', 'w') as fl:
     print(best_mols_rec, file=fl)
 
 top_20_indices = top_n_molecule_indices(objective_values, n_idx=20)
 best_mols_t20 = {i+1: decoded_mols[i] for i in top_20_indices}
 best_props_t20 = {i+1: [EA_re[i], EA_bo[i], IP_re[i], IP_bo[i]] for i in top_20_indices}
-with open(dir_name+'top20_mols_'+str(cutoff)+'_'+str(objective_type)+'.txt', 'w') as fl:
+with open(dir_name+'top20_mols_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'.txt', 'w') as fl:
     print(best_mols_t20, file=fl)
     print(best_props_t20, file=fl)
 
@@ -534,7 +545,7 @@ plt.xlabel('pc1')
 plt.ylabel('pc2')
 plt.title('Optimization in latent space')
 
-plt.savefig(dir_name+'BO_imp_projected_to_pca_'+str(cutoff)+'_'+str(objective_type)+'.png',  dpi=300)
+plt.savefig(dir_name+'BO_imp_projected_to_pca_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'.png',  dpi=300)
 
 plt.figure(3)
 
@@ -562,7 +573,7 @@ plt.xlabel('pc1')
 plt.ylabel('pc2')
 plt.title('Optimization in latent space')
 
-plt.savefig(dir_name+'BO_imp_projected_to_pca_onlyred_'+str(cutoff)+'_'+str(objective_type)+'.png',  dpi=300)
+plt.savefig(dir_name+'BO_imp_projected_to_pca_onlyred_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'.png',  dpi=300)
 
 
 
@@ -606,7 +617,7 @@ with torch.no_grad():
 
 print(f'Saving generated strings')
 i=0
-with open(dir_name+'results_around_BO_seed_'+str(cutoff)+'_'+str(objective_type)+'.txt', 'w') as f:
+with open(dir_name+'results_around_BO_seed_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'.txt', 'w') as f:
     f.write("Seed string decoded: " + seed_string[0] + "\n")
     f.write("Prediction: "+ str(y_seed[0]))
     f.write("The results, sampling around the best population are the following\n")
@@ -798,7 +809,7 @@ classes_stoich = [['0.5','0.5'],['0.25','0.75'],['0.75','0.25']]
 classes_con = ['<1-3:0.25:0.25<1-4:0.25:0.25<2-3:0.25:0.25<2-4:0.25:0.25<1-2:0.25:0.25<3-4:0.25:0.25<1-1:0.25:0.25<2-2:0.25:0.25<3-3:0.25:0.25<4-4:0.25:0.25','<1-3:0.5:0.5<1-4:0.5:0.5<2-3:0.5:0.5<2-4:0.5:0.5','<1-2:0.375:0.375<1-1:0.375:0.375<2-2:0.375:0.375<3-4:0.375:0.375<3-3:0.375:0.375<4-4:0.375:0.375<1-3:0.125:0.125<1-4:0.125:0.125<2-3:0.125:0.125<2-4:0.125:0.125']
 whole_valid = len(monomer_smiles_predicted)
 validity = whole_valid/len(all_predictions)
-with open(dir_name+'novelty_BO_seed_'+str(objective_type)+'.txt', 'w') as f:
+with open(dir_name+'novelty_BO_seed_'+str(objective_type)+'_'+str(stopping_criterion)+'.txt', 'w') as f:
     f.write("Gen Mon A validity: %.4f %% Gen Mon B validity: %.4f %% "% (100*validityA, 100*validityB,))
     f.write("Gen validity: %.4f %% "% (100*validity,))
     f.write("Novelty: %.4f %% "% (100*novelty,))
@@ -869,7 +880,7 @@ plt.ylabel('Density')
 plt.title('Kernel Density Estimation (Electron affinity)')
 plt.legend()
 plt.show()
-plt.savefig(dir_name+'KDEy1_BO_seed.png')
+plt.savefig(dir_name+'KDEy1_BO_seed'+'_'+str(stopping_criterion)+'.png')
 
 """ y2 """
 plt.figure(5)
@@ -912,4 +923,4 @@ plt.ylabel('Density')
 plt.title('Kernel Density Estimation (Ionization potential)')
 plt.legend()
 plt.show()
-plt.savefig(dir_name+'KDEy2_BO_seed.png')
+plt.savefig(dir_name+'KDEy2_BO_seed'+'_'+str(stopping_criterion)+'.png')

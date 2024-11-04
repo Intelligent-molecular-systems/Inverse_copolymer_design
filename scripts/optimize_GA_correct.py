@@ -7,6 +7,7 @@ from pymoo.operators.mutation.pm import PolynomialMutation
 from pymoo.optimize import minimize
 from pymoo.core.termination import Termination
 from pymoo.core.population import Population
+from pymoo.termination import get_termination
 import argparse
 import torch
 from torch_geometric.loader import DataLoader
@@ -14,6 +15,7 @@ from torch.utils.data import Dataset
 from scipy.spatial import distance
 import pickle
 import time
+from datetime import timedelta
 
 
 import sys, os
@@ -41,19 +43,23 @@ if device.type == 'cuda':
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--augment", help="options: augmented, original", default="augmented", choices=["augmented", "original"])
-parser.add_argument("--tokenization", help="options: oldtok, RT_tokenized", default="oldtok", choices=["oldtok", "RT_tokenized"])
+parser.add_argument("--tokenization", help="options: oldtok, RT_tokenized", default="RT_tokenized", choices=["oldtok", "RT_tokenized"])
 parser.add_argument("--embedding_dim", help="latent dimension (equals word embedding dimension in this model)", default=32)
-parser.add_argument("--beta", default=1, help="option: <any number>, schedule", choices=["normalVAE","schedule"])
-parser.add_argument("--loss", default="ce", choices=["ce","wce"])
+parser.add_argument("--beta", default="schedule", help="option: <any number>, schedule", choices=["normalVAE","schedule"])
+parser.add_argument("--loss", default="wce", choices=["ce","wce"])
 parser.add_argument("--AE_Warmup", default=False, action='store_true')
-parser.add_argument("--seed", type=int, default=42)
+parser.add_argument("--seed", type=int, default=1)
 parser.add_argument("--initialization", default="random", choices=["random"])
 parser.add_argument("--add_latent", type=int, default=1)
-parser.add_argument("--ppguided", type=int, default=0)
+parser.add_argument("--ppguided", type=int, default=1)
 parser.add_argument("--dec_layers", type=int, default=4)
-parser.add_argument("--max_beta", type=float, default=0.1)
-parser.add_argument("--max_alpha", type=float, default=0.1)
-parser.add_argument("--epsilon", type=float, default=1)
+parser.add_argument("--max_beta", type=float, default=0.0004)
+parser.add_argument("--max_alpha", type=float, default=0.2)
+parser.add_argument("--epsilon", type=float, default=1.0)
+parser.add_argument("--max_iter", type=int, default=1000)
+parser.add_argument("--max_time", type=int, default=3600)
+parser.add_argument("--stopping_type", type=str, default="iter", choices=["iter","time", "convergence"])
+parser.add_argument("--opt_run", type=int, default=1)
 
 
 args = parser.parse_args()
@@ -340,15 +346,35 @@ if not cutoff==0.0:
 
 # Initialize the problem
 # options: max_gap, EAmin, mimick_peak, mimick_best
-objective_type='mimick_peak'
+opt_run = args.opt_run
+objective_type='EAmin'
 problem = Property_optimization_problem(model, min_values, max_values, objective_type)
 
 # Termination criterium
 termination = ConvergenceTermination(conv_threshold=0.0025, conv_generations=20, n_max_gen=500)
 
+stopping_type = args.stopping_type # time or iter
+max_time = args.max_time  # Set to 600 seconds, for example
+max_iter = args.max_iter # Set to a maximum number of iterations 
+
+if stopping_type == "time":
+    stopping_criterion = stopping_type+"_"+str(max_time)
+    hours, remainder = divmod(max_time, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    time_str = f"{hours:02}:{minutes:02}:{seconds:02}"
+
+    termination = get_termination("time", time_str)
+    pop_size = 200
+
+
+elif stopping_type == "iter":
+    stopping_criterion = stopping_type+"_"+str(max_iter)
+    termination = get_termination("n_eval", max_iter)
+    pop_size = int(max_iter / 15) # 15 generations
+
 
 # Define NSGA2 algorithm parameters
-pop_size = 200
+#pop_size = max_iter / 10
 sampling = LatinHypercubeSampling()
 crossover = SimulatedBinaryCrossover(prob=0.90, eta=20)
 #crossover = SimulatedBinaryCrossover()
@@ -498,18 +524,18 @@ best_fitness = res.F
 results_custom = problem.results_custom
  
 
-with open(dir_name+'res_optimization_GA_correct_'+str(objective_type), 'wb') as f:
+with open(dir_name+'res_optimization_GA_correct_'+str(objective_type)+'_'+str(stopping_criterion)+'_run'+str(opt_run)+'.pkl', 'wb') as f:
     pickle.dump(res, f)
-with open(dir_name+'optimization_results_custom_GA_correct_'+str(objective_type)+'.pkl', 'wb') as f:
+with open(dir_name+'optimization_results_custom_GA_correct_'+str(objective_type)+'_'+str(stopping_criterion)+'_run'+str(opt_run)+'.pkl', 'wb') as f:
     pickle.dump(results_custom, f)
-with open(dir_name+'optimization_results_custom_GA_correct_'+str(objective_type)+'.txt', 'w') as fl:
+with open(dir_name+'optimization_results_custom_GA_correct_'+str(objective_type)+'_'+str(stopping_criterion)+'_run'+str(opt_run)+'.txt', 'w') as fl:
      print(results_custom, file=fl)
 
 #convergence = res.algorithm.termination
 with open(dir_name+'res_optimization_GA_correct_'+str(objective_type), 'rb') as f:
     res = pickle.load(f)
 
-with open(dir_name+'optimization_results_custom_GA_correct_'+str(objective_type)+'.pkl', 'rb') as f:
+with open(dir_name+'optimization_results_custom_GA_correct_'+str(objective_type)+'_'+str(stopping_criterion)+'_run'+str(opt_run)+'.pkl', 'rb') as f:
     results_custom = pickle.load(f)
 
 # Calculate distances between the BO and reencoded latents
@@ -547,7 +573,7 @@ plt.plot(iterations, IP_re, label='IP (RE)')
 plt.xlabel('Index')
 plt.ylabel('Value')
 plt.legend()
-plt.savefig(dir_name+'GA_objectives_correct.png',  dpi=300)
+plt.savefig(dir_name+'GA_objectives_correct_'+str(stopping_criterion)+'_run'+str(opt_run)+'.png',  dpi=300)
 plt.close()
 
 import math 
@@ -612,7 +638,7 @@ IP_re_imp = [IP_re[i] for i in indices_of_increases]
 best_z_re = [Latents_RE[i] for i in indices_of_increases]
 best_mols = {i+1: decoded_mols[i] for i in indices_of_increases}
 best_props = {i+1: [EA_re[i],IP_re[i]] for i in indices_of_increases}
-with open(dir_name+'best_mols_GA_correct_'+str(objective_type)+'.txt', 'w') as fl:
+with open(dir_name+'best_mols_GA_correct_'+str(objective_type)+'_'+str(stopping_criterion)+'_run'+str(opt_run)+'.txt', 'w') as fl:
     print(best_mols, file=fl)
     print(best_props, file=fl)
 
@@ -622,7 +648,7 @@ best_props_t20 = {i+1: [EA_re[i], IP_re[i]] for i in top_20_indices}
 best_props_t20_c = {i+1: [EA_re_c[i], IP_re_c[i]] for i in top_20_indices}
 best_objs_t20 = {i+1: objective_values[i] for i in top_20_indices}
 best_objs_t20_c = {i+1: objective_values_c[i] for i in top_20_indices}
-with open(dir_name+'top20_mols_GA_correct_'+str(objective_type)+'.txt', 'w') as fl:
+with open(dir_name+'top20_mols_GA_correct_'+str(objective_type)+'_'+str(stopping_criterion)+'_run'+str(opt_run)+'.txt', 'w') as fl:
     print(best_mols_t20, file=fl)
     print(best_props_t20, file=fl)
     print(best_props_t20_c, file=fl)

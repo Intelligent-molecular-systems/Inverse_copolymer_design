@@ -56,6 +56,11 @@ parser.add_argument("--dec_layers", type=int, default=4)
 parser.add_argument("--max_beta", type=float, default=0.0004)
 parser.add_argument("--max_alpha", type=float, default=0.2)
 parser.add_argument("--epsilon", type=float, default=1.0)
+parser.add_argument("--max_iter", type=int, default=1000)
+parser.add_argument("--max_time", type=int, default=3600)
+parser.add_argument("--stopping_type", type=str, default="iter", choices=["iter","time"])
+parser.add_argument("--opt_run", type=int, default=1)
+
 
 
 args = parser.parse_args()
@@ -280,12 +285,14 @@ elif cutoff==0:
 
 
 
+opt_run = args.opt_run
+
 nr_vars = 32
 objective_type='EAmin' # options: max_gap, EAmin, mimick_peak, mimick_best
 prop_predictor = PropertyPrediction(model, nr_vars, objective_type)
 
 # Initialize BayesianOptimization
-optimizer = BayesianOptimization(f=prop_predictor.evaluate, pbounds=bounds)
+optimizer = BayesianOptimization(f=prop_predictor.evaluate, pbounds=bounds, random_state=opt_run)
 
 # Perform optimization
 # Perform optimization
@@ -293,25 +300,29 @@ optimizer = BayesianOptimization(f=prop_predictor.evaluate, pbounds=bounds)
 utility = UtilityFunction(kind="ucb")
 
 # Define the time limit in seconds
-stopping_type = "time" # time or iter
-max_time = 600  # Set to 600 seconds, for example
-max_iter = 500 # Set to a maximum number of iterations 
+stopping_type = args.stopping_type # time or iter
+max_time = args.max_time  # Set to 600 seconds, for example
+max_iter = args.max_iter # Set to a maximum number of iterations 
 if stopping_type == "time":
     stopping_criterion = stopping_type+"_"+str(max_time)
 elif stopping_type == "iter":
     stopping_criterion = stopping_type+"_"+str(max_iter)
+    max_time = None
 
 # Run the optimizer with the callback
 # Custom modification of the maximize function: If the max_time argument is specified, the 
-optimizer.maximize(init_points=5, n_iter=100, acquisition_function=utility, max_time=max_time)
+start_time = time.time()
+optimizer.maximize(init_points=20, n_iter=max_iter-10, acquisition_function=utility, max_time=max_time)
+elapsed_time = time.time() - start_time
+print(f"Elapsed time: {elapsed_time:.2f} seconds")
 
 #optimizer.maximize(init_points=20, n_iter=500, acquisition_function=utility)
 results = optimizer.res
 results_custom = prop_predictor.results_custom
 
-with open(dir_name+'optimization_results_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'.pkl', 'wb') as f:
+with open(dir_name+'optimization_results_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'_run'+str(opt_run)+'.pkl', 'wb') as f:
     pickle.dump(results, f)
-with open(dir_name+'optimization_results_custom_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'.pkl', 'wb') as f:
+with open(dir_name+'optimization_results_custom_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'_run'+str(opt_run)+'.pkl', 'wb') as f:
     pickle.dump(results_custom, f)
 
 
@@ -323,12 +334,12 @@ best_objective = optimizer.max['target']
 print("Best Parameters:", best_params)
 print("Best Objective Value:", best_objective)
 
-with open(dir_name+'optimization_results_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'.pkl', 'rb') as f:
+with open(dir_name+'optimization_results_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'_run'+str(opt_run)+'.pkl', 'rb') as f:
     results = pickle.load(f)
-with open(dir_name+'optimization_results_custom_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'.pkl', 'rb') as f:
+with open(dir_name+'optimization_results_custom_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'_run'+str(opt_run)+'.pkl', 'rb') as f:
     results_custom = pickle.load(f)
 
-with open(dir_name+'optimization_results_custom_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'.txt', 'w') as fl:
+with open(dir_name+'optimization_results_custom_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'_run'+str(opt_run)+'.txt', 'w') as fl:
      print(results_custom, file=fl)
 #print(results_custom)
 # Calculate distances between the BO and reencoded latents
@@ -400,7 +411,7 @@ plt.plot(iterations, IP_re, label='IP (RE)')
 plt.xlabel('Index')
 plt.ylabel('Value')
 plt.legend()
-plt.savefig(dir_name+'BO_objectives_'+str(cutoff)+'_'+str(stopping_criterion)+'.png',  dpi=300)
+plt.savefig(dir_name+'BO_objectives_'+str(cutoff)+'_'+str(stopping_criterion)+'_run'+str(opt_run)+'.png',  dpi=300)
 plt.close()
 
 
@@ -435,7 +446,7 @@ clb = plt.colorbar()
 clb.ax.set_title('Electron affinity')
 plt.scatter(z_embedded_BO[:, 0], z_embedded_BO[:, 1], s=2, c='black')
 plt.scatter(z_embedded_RE[:, 0], z_embedded_RE[:, 1], s=2, c='red')
-plt.savefig(dir_name+'BO_projected_to_pca_'+str(cutoff)+'_'+str(stopping_criterion)+'.png',  dpi=300)
+plt.savefig(dir_name+'BO_projected_to_pca_'+str(cutoff)+'_'+str(stopping_criterion)+'_run'+str(opt_run)+'.png',  dpi=300)
 plt.close()
 #pca = PCA(n_components=2)
 
@@ -465,9 +476,20 @@ def top_n_molecule_indices(objective_values, n_idx=10):
     filtered_indexed_values = [(index, value) for index, value in enumerate(objective_values) if not math.isnan(value)]
     # Sort the indexed values by the value in descending order and take n_idx best ones
     sorted_filtered_indexed_values = sorted(filtered_indexed_values, key=lambda x: x[1], reverse=True)
-    top_idxs = [index for index, value in sorted_filtered_indexed_values[:n_idx]]
+    _best_mols = []
+    best_mols_count = {}
+    top_idxs = []
+    for index, value in sorted_filtered_indexed_values: 
+        if not decoded_mols[index] in _best_mols: 
+            top_idxs.append(index)
+            best_mols_count[decoded_mols[index]]=1
+            _best_mols.append(decoded_mols[index])
+        else:
+            best_mols_count[decoded_mols[index]]+=1
+        if len(top_idxs)==20:
+            break
 
-    return top_idxs
+    return top_idxs, best_mols_count
 
 # Extract data for the curves
 if objective_type=='mimick_peak':
@@ -489,16 +511,16 @@ best_z_re = [Latents_RE[i] for i in indices_of_increases]
 best_mols = {i+1: decoded_mols[i] for i in indices_of_increases}
 best_props = {i+1: [EA_re[i], EA_bo[i], IP_re[i], IP_bo[i]] for i in indices_of_increases}
 best_mols_rec = {i+1: rec_mols[i] for i in indices_of_increases}
-with open(dir_name+'best_mols_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'.txt', 'w') as fl:
+with open(dir_name+'best_mols_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'_run'+str(opt_run)+'.txt', 'w') as fl:
     print(best_mols, file=fl)
     print(best_props, file=fl)
-with open(dir_name+'best_recon_mols_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'.txt', 'w') as fl:
+with open(dir_name+'best_recon_mols_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'_run'+str(opt_run)+'.txt', 'w') as fl:
     print(best_mols_rec, file=fl)
 
-top_20_indices = top_n_molecule_indices(objective_values, n_idx=20)
+top_20_indices, top_20_mols = top_n_molecule_indices(objective_values, n_idx=20)
 best_mols_t20 = {i+1: decoded_mols[i] for i in top_20_indices}
 best_props_t20 = {i+1: [EA_re[i], EA_bo[i], IP_re[i], IP_bo[i]] for i in top_20_indices}
-with open(dir_name+'top20_mols_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'.txt', 'w') as fl:
+with open(dir_name+'top20_mols_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'_run'+str(opt_run)+'.txt', 'w') as fl:
     print(best_mols_t20, file=fl)
     print(best_props_t20, file=fl)
 
@@ -550,7 +572,7 @@ plt.xlabel('pc1')
 plt.ylabel('pc2')
 plt.title('Optimization in latent space')
 
-plt.savefig(dir_name+'BO_imp_projected_to_pca_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'.png',  dpi=300)
+plt.savefig(dir_name+'BO_imp_projected_to_pca_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'_run'+str(opt_run)+'.png',  dpi=300)
 
 plt.figure(3)
 
@@ -578,7 +600,7 @@ plt.xlabel('pc1')
 plt.ylabel('pc2')
 plt.title('Optimization in latent space')
 
-plt.savefig(dir_name+'BO_imp_projected_to_pca_onlyred_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'.png',  dpi=300)
+plt.savefig(dir_name+'BO_imp_projected_to_pca_onlyred_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'_run'+str(opt_run)+'.png',  dpi=300)
 
 
 
@@ -622,7 +644,7 @@ with torch.no_grad():
 
 print(f'Saving generated strings')
 i=0
-with open(dir_name+'results_around_BO_seed_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'.txt', 'w') as f:
+with open(dir_name+'results_around_BO_seed_'+str(cutoff)+'_'+str(objective_type)+'_'+str(stopping_criterion)+'_run'+str(opt_run)+'.txt', 'w') as f:
     f.write("Seed string decoded: " + seed_string[0] + "\n")
     f.write("Prediction: "+ str(y_seed[0]))
     f.write("The results, sampling around the best population are the following\n")
@@ -814,7 +836,7 @@ classes_stoich = [['0.5','0.5'],['0.25','0.75'],['0.75','0.25']]
 classes_con = ['<1-3:0.25:0.25<1-4:0.25:0.25<2-3:0.25:0.25<2-4:0.25:0.25<1-2:0.25:0.25<3-4:0.25:0.25<1-1:0.25:0.25<2-2:0.25:0.25<3-3:0.25:0.25<4-4:0.25:0.25','<1-3:0.5:0.5<1-4:0.5:0.5<2-3:0.5:0.5<2-4:0.5:0.5','<1-2:0.375:0.375<1-1:0.375:0.375<2-2:0.375:0.375<3-4:0.375:0.375<3-3:0.375:0.375<4-4:0.375:0.375<1-3:0.125:0.125<1-4:0.125:0.125<2-3:0.125:0.125<2-4:0.125:0.125']
 whole_valid = len(monomer_smiles_predicted)
 validity = whole_valid/len(all_predictions)
-with open(dir_name+'novelty_BO_seed_'+str(objective_type)+'_'+str(stopping_criterion)+'.txt', 'w') as f:
+with open(dir_name+'novelty_BO_seed_'+str(objective_type)+'_'+str(stopping_criterion)+'_run'+str(opt_run)+'.txt', 'w') as f:
     f.write("Gen Mon A validity: %.4f %% Gen Mon B validity: %.4f %% "% (100*validityA, 100*validityB,))
     f.write("Gen validity: %.4f %% "% (100*validity,))
     f.write("Novelty: %.4f %% "% (100*novelty,))
@@ -885,7 +907,7 @@ plt.ylabel('Density')
 plt.title('Kernel Density Estimation (Electron affinity)')
 plt.legend()
 plt.show()
-plt.savefig(dir_name+'KDEy1_BO_seed'+'_'+str(stopping_criterion)+'.png')
+plt.savefig(dir_name+'KDEy1_BO_seed'+'_'+str(stopping_criterion)+'_run'+str(opt_run)+'.png')
 
 """ y2 """
 plt.figure(5)
@@ -928,4 +950,4 @@ plt.ylabel('Density')
 plt.title('Kernel Density Estimation (Ionization potential)')
 plt.legend()
 plt.show()
-plt.savefig(dir_name+'KDEy2_BO_seed'+'_'+str(stopping_criterion)+'.png')
+plt.savefig(dir_name+'KDEy2_BO_seed'+'_'+str(stopping_criterion)+'_run'+str(opt_run)+'.png')

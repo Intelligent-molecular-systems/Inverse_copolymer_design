@@ -347,7 +347,7 @@ if not cutoff==0.0:
 # Initialize the problem
 # options: max_gap, EAmin, mimick_peak, mimick_best
 opt_run = args.opt_run
-objective_type='EAmin'
+objective_type='mimick_best'
 problem = Property_optimization_problem(model, min_values, max_values, objective_type)
 
 # Termination criterium
@@ -364,13 +364,13 @@ if stopping_type == "time":
     time_str = f"{hours:02}:{minutes:02}:{seconds:02}"
 
     termination = get_termination("time", time_str)
-    pop_size = 200
+    pop_size = 100
 
 
 elif stopping_type == "iter":
     stopping_criterion = stopping_type+"_"+str(max_iter)
     termination = get_termination("n_eval", max_iter)
-    pop_size = int(max_iter / 15) # 15 generations
+    pop_size = int(max_iter / 20) # 20 generations, pop size 100
 
 
 # Define NSGA2 algorithm parameters
@@ -507,15 +507,18 @@ algorithm = NSGA2(pop_size=pop_size,
                   eliminate_duplicates=True)
 
 # Optimize the problem
+start_time = time.time()
 all_solutions = []
 best_solutions = []
 res = minimize(
     problem,
     algorithm,
     termination,
-    seed=1,
+    seed=opt_run,
     verbose=True,
 )
+elapsed_time = time.time() - start_time
+print(f"Elapsed time: {elapsed_time:.2f} seconds")
 
 # Access the results
 best_solution = res.X
@@ -532,7 +535,7 @@ with open(dir_name+'optimization_results_custom_GA_correct_'+str(objective_type)
      print(results_custom, file=fl)
 
 #convergence = res.algorithm.termination
-with open(dir_name+'res_optimization_GA_correct_'+str(objective_type), 'rb') as f:
+with open(dir_name+'res_optimization_GA_correct_'+str(objective_type)+'_'+str(stopping_criterion)+'_run'+str(opt_run)+'.pkl', 'rb') as f:
     res = pickle.load(f)
 
 with open(dir_name+'optimization_results_custom_GA_correct_'+str(objective_type)+'_'+str(stopping_criterion)+'_run'+str(opt_run)+'.pkl', 'rb') as f:
